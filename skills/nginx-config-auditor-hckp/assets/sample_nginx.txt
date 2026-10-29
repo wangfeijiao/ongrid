@@ -1,0 +1,41 @@
+# 示例：故意存在多处配置隐患的 Nginx 站点配置（用于演示审计输出）
+# 生产环境请勿直接使用
+
+user  root;   # 隐患：以 root 运行
+
+http {
+    # 隐患：未关闭 server_tokens，版本号泄露
+    server_tokens on;
+
+    server {
+        listen 80;
+        server_name example.com;
+        # 隐患：80 端口无 301 跳转到 HTTPS
+
+        location / {
+            root /var/www/html;
+            # 隐患：目录列表开启，可被遍历
+            autoindex on;
+            index index.html;
+        }
+    }
+
+    server {
+        listen 443 ssl;
+        server_name example.com;
+
+        ssl_certificate     /etc/nginx/ssl/example.com.crt;
+        ssl_certificate_key /etc/nginx/ssl/example.com.key;
+        # 隐患：启用已废弃的 TLSv1 / TLSv1.1
+        ssl_protocols TLSv1 TLSv1.1 TLSv1.2;
+        # 隐患：含弱加密套件
+        ssl_ciphers "HIGH:RC4:!aNULL:!MD5";
+
+        # 隐患：缺失全部安全响应头（X-Frame-Options / CSP / X-Content-Type-Options / Referrer-Policy）
+
+        location / {
+            proxy_pass http://127.0.0.1:8080;
+            # 隐患：未限制 client_max_body_size、未配 limit_req
+        }
+    }
+}

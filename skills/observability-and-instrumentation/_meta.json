@@ -1,0 +1,26 @@
+{
+  "slug": "observability-and-instrumentation",
+  "title": "可观测性 / Observability",
+  "version": "1.0.0",
+  "author": "zxh",
+  "runtime": "generic",
+  "emoji": "📊",
+  "color": "teal",
+  "tags": [
+    "可观测性",
+    "结构化日志",
+    "指标监控",
+    "链路追踪",
+    "告警",
+    "OpenTelemetry",
+    "Observability",
+    "Instrumentation",
+    "Alerting"
+  ],
+  "description": "结构化日志、RED 指标、链路追踪与基于症状的告警，让线上问题能被发现而不是被猜测。",
+  "description_en": "Structured logs, RED metrics, traces and symptom-based alerts so production issues are detected, not guessed at.",
+  "display_name": "可观测性",
+  "display_name_en": "Observability",
+  "description_zh": "结构化日志、RED 指标、链路追踪与基于症状的告警，让线上问题能被发现而不是被猜测。",
+  "category": "engineering"
+}

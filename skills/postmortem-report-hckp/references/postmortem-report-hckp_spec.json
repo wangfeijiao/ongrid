@@ -1,0 +1,47 @@
+{
+  "resource_id": "/api/v1/postmortem-report-hckp/spec",
+  "title": "故障复盘报告",
+  "goods_name": "故障复盘规范包",
+  "archetype": "audit",
+  "price_fen": 100,
+  "dimensions": [
+    {
+      "name": "时间线还原",
+      "weight": 30,
+      "criteria": "精确到分钟的事件线"
+    },
+    {
+      "name": "根因分析",
+      "weight": 30,
+      "criteria": "区分直接与根本原因"
+    },
+    {
+      "name": "影响评估",
+      "weight": 25,
+      "criteria": "量化影响范围与时长"
+    },
+    {
+      "name": "改进项",
+      "weight": 15,
+      "criteria": "含责任人与时限"
+    }
+  ],
+  "standards": [
+    "须还原精确时间线",
+    "须区分直接原因与根本原因",
+    "须量化影响",
+    "改进项须可跟踪"
+  ],
+  "benchmarks": {
+    "复盘时限": "故障后5个工作日",
+    "时间线精度": "分钟级",
+    "改进跟踪": "闭环"
+  },
+  "sections": [
+    "故障概要",
+    "时间线",
+    "根因分析",
+    "改进项与跟踪"
+  ],
+  "topic": "故障复盘报告方法"
+}

@@ -70,3 +70,22 @@ deploy/install/certs/
 # build cache: stack-dep upstream binaries fetched by dist/package.sh
 .cache/
 .gstack/
+
+# WorkBuddy agent workspace (local memory, temp scripts, downloaded binaries)
+.workbuddy/
+
+# Batch edge deployment: large binaries and credentials must never be committed
+deploy-edge-batch/payload/
+deploy-edge-batch/credentials.json
+deploy-edge-batch/credentials-*.json
+deploy-edge-batch/*credentials*.json
+deploy-edge-batch/deploy-result.json
+deploy-edge-batch/deploy-result-*.json
+deploy-edge-batch/probe-result.json
+deploy-edge-batch/probe-result.*.json
+deploy-edge-batch/.deploy*.log
+# Upgrade toolchain: staging packages, downloaded assets and run logs
+deploy-edge-batch/upgrade/pkg/
+deploy-edge-batch/upgrade/cache/
+deploy-edge-batch/upgrade/*.log
+deploy-edge-batch/upgrade/*-result.json

@@ -1,0 +1,10 @@
+{
+  "authorization_confirmed": true,
+  "scope": [
+    "http://127.0.0.1:8777"
+  ],
+  "authorized_by": "（填写授权方/项目名称）",
+  "authorization_reference": "（填写授权书编号或SRC项目链接）",
+  "valid_until": "2026-12-31",
+  "notes": "仅在获得书面授权后填写 true。scope 数组外的任何目标都会被拒绝扫描。"
+}

@@ -1,0 +1,22 @@
+{
+  "authorization_confirmed": true,
+  "scope": [
+    "http://127.0.0.1:8777"
+  ],
+  "authorized_by": "（填写授权方/项目名称）",
+  "authorization_reference": "（填写授权书编号或SRC项目链接）",
+  "tasks": [
+    {
+      "id": "T001",
+      "name": "靶场全量检测",
+      "targets": ["http://127.0.0.1:8777"],
+      "status": "pending"
+    },
+    {
+      "id": "T002",
+      "name": "（示例）另一个授权目标",
+      "targets": [],
+      "status": "pending"
+    }
+  ]
+}

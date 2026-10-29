@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -67,6 +68,7 @@ describe('Repository cards and SSH summary', () => {
     server.use(
       http.get('/api/v1/knowledge/repos', () => HttpResponse.json({ items: [repo] })),
       http.get('/api/v1/knowledge/ssh-identities', () => HttpResponse.json({ items: [] })),
+      http.get('/api/v1/knowledge/repos/refs', () => HttpResponse.json({ branches: ['main', 'v2'], tags: [] })),
       http.patch('/api/v1/knowledge/repos/7', async ({ request }) => {
         const body = await request.json() as { branch: string; description: string };
         expect(body).not.toHaveProperty('url');
@@ -95,15 +97,34 @@ describe('Repository cards and SSH summary', () => {
     server.use(
       http.get('/api/v1/knowledge/repos', () => HttpResponse.json({ items: [] })),
       http.get('/api/v1/knowledge/ssh-identities', () => HttpResponse.json({ items: [] })),
+      http.get('/api/v1/knowledge/repos/refs', () => HttpResponse.json({ branches: ['main'], tags: [] })),
       http.post('/api/v1/knowledge/repos', () => HttpResponse.json({ message: 'repository access denied' }, { status: 400 })),
     );
     render(<MemoryRouter><KnowledgeRepos /></MemoryRouter>);
     fireEvent.click((await screen.findAllByRole('button', { name: '添加仓库' }))[0]);
     fireEvent.change(screen.getByLabelText('仓库 URL *'), { target: { value: 'https://example/private.git' } });
+    fireEvent.change(screen.getByLabelText('文档索引分支或 Tag'), { target: { value: 'main' } });
     fireEvent.click(screen.getByRole('button', { name: '验证并保存' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('repository access denied');
     expect(screen.getByLabelText('仓库 URL *')).toHaveValue('https://example/private.git');
     expect(screen.queryByText('保存（保存后再点同步）')).not.toBeInTheDocument();
+  });
+  it('loads branch and tag suggestions from the refs endpoint', async () => {
+    server.use(
+      http.get('/api/v1/knowledge/repos', () => HttpResponse.json({ items: [] })),
+      http.get('/api/v1/knowledge/ssh-identities', () => HttpResponse.json({ items: [] })),
+      http.get('/api/v1/knowledge/repos/refs', () => HttpResponse.json({ branches: ['main', 'dev'], tags: ['v1.0.0'] })),
+    );
+    const user = userEvent.setup();
+    render(<MemoryRouter><KnowledgeRepos /></MemoryRouter>);
+    fireEvent.click((await screen.findAllByRole('button', { name: '添加仓库' }))[0]);
+    fireEvent.change(screen.getByLabelText('仓库 URL *'), { target: { value: 'https://example/repo.git' } });
+    expect(await screen.findByText('已加载 2 个分支、1 个 Tag。')).toBeInTheDocument();
+    const branch = screen.getByLabelText('文档索引分支或 Tag');
+    await user.click(branch);
+    expect(await screen.findByRole('option', { name: 'main' })).toBeInTheDocument();
+    expect(screen.getByText('分支')).toBeInTheDocument();
+    expect(screen.getByText('Tag')).toBeInTheDocument();
   });
 
 });

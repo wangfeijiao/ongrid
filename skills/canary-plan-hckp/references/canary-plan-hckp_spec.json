@@ -1,0 +1,47 @@
+{
+  "resource_id": "/api/v1/canary-plan-hckp/spec",
+  "title": "灰度发布方案",
+  "goods_name": "灰度发布规范包",
+  "archetype": "plan",
+  "price_fen": 100,
+  "dimensions": [
+    {
+      "name": "灰度维度",
+      "weight": 30,
+      "criteria": "按流量/用户/区域分批"
+    },
+    {
+      "name": "观察指标",
+      "weight": 30,
+      "criteria": "业务与技术指标齐备"
+    },
+    {
+      "name": "回滚触发",
+      "weight": 25,
+      "criteria": "自动/手动回滚条件"
+    },
+    {
+      "name": "放量节奏",
+      "weight": 15,
+      "criteria": "小步快跑逐步放量"
+    }
+  ],
+  "standards": [
+    "灰度须按明确维度分流",
+    "须同时观察业务与技术指标",
+    "须设自动回滚触发条件",
+    "放量须小步慢跑"
+  ],
+  "benchmarks": {
+    "首批灰度": "5%",
+    "放量步长": "5%→25%→50%→100%",
+    "观察时长": "每批≥30分钟"
+  },
+  "sections": [
+    "灰度策略",
+    "观察指标",
+    "回滚条件",
+    "放量计划"
+  ],
+  "topic": "灰度发布方案设计"
+}

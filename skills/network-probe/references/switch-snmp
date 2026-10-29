@@ -1,0 +1,39 @@
+# 交换机 SNMP 集成参考（私接路由定位与断网）
+
+## 前提
+- 交换机需为**可网管型**（华为/华三/思科/锐捷/Ruijie/MikroTik 等），家用傻瓜交换机无法定位端口。
+- 需开启 SNMP（建议 v2c，读社区 + 写社区分离；写社区用于关闭端口）。
+- 探针主机需能路由/可达交换机管理 IP（通常带外管理网段）。
+
+## 关键 MIB OID
+| 用途 | OID | 说明 |
+|---|---|---|
+| 桥 MAC 表-地址 | 1.3.6.1.2.1.17.4.3.1.1 (dot1dTpFdbAddress) | MAC 学习表，OID 后缀为 MAC 的 6 字节 |
+| 桥 MAC 表-端口 | 1.3.6.1.2.1.17.4.3.1.2 (dot1dTpFdbPort) | MAC → 交换机本地桥端口号 |
+| 桥端口→ifIndex | 1.3.6.1.2.1.17.1.4.1.2 (dot1dBasePortIfIndex) | 桥端口 → 标准 ifIndex |
+| 端口名 | 1.3.6.1.2.1.2.2.1.2 (ifDescr) | ifIndex → GigabitEthernet1/0/12 |
+| 端口管理状态 | 1.3.6.1.2.1.2.2.1.7 (ifAdminStatus) | 1=up 2=down（**可写，用于断网**） |
+| 端口运营状态 | 1.3.6.1.2.1.2.2.1.8 (ifOperStatus) | 1=up 2=down（只读） |
+| 入/出错包 | 1.3.6.1.2.1.2.2.1.14 / .20 | 错包计数（线缆/双工问题信号） |
+| VLAN（Q-BRIDGE） | 1.3.6.1.2.1.17.7.1.4.5.1.1 (dot1qPvid) | 端口 PVID（需 VLAN 排查时） |
+
+> H3C/华为部分机型 BRIDGE-MIB 在实例 1 下；若查不到 MAC，尝试 `snmpwalk 1.3.6.1.2.1.17` 确认 OID 实例。
+
+## 定位端口流程（脚本已封装）
+1. `mac_to_port()`：取 dot1dTpFdbAddress/Port + dot1dBasePortIfIndex，得到 `{mac: ifIndex}`。
+2. `locate(mac)`：查目标 MAC → ifIndex → ifDescr，返回端口名。
+3. `port_clients_count()`：统计每端口学习到的 MAC 数；**单 access 端口下 MAC 数异常多（≥5）即强烈提示后面接了私接路由/AP/小交换机**。
+
+## 断网处置（关端口）
+- `set_port_admin(ifindex, down=True)` → SNMP SET `ifAdminStatus.ifindex = 2`。
+- 恢复：`down=False` → SET 1（no shutdown）。
+- **安全门控**：rogue_scan.py 的真正关闭需 `--cut-off --confirm` 双开关；默认仅输出建议。关闭前务必确认该端口确属私接、且不影响合法业务（如 VoIP、打印机、门禁）。
+
+## 无 SNMP/无网管交换机时的替代
+- 在网关/网康 ICG 按 MAC 加黑名单（网络层阻断私接路由出网）。
+- 用 `netsh wlan show networks mode=bssid` 发现周边 SSID，非授权 SSID 即疑似私接 AP，再结合现场排查物理位置。
+
+## 厂商注意
+- 思科：SNMP 默认 v2c 关闭，需 `snmp-server community xxx RW`；关端口也可走 SSH（CLI `interface xx / shutdown`）。
+- 华为/华三：SNMP 团体名区分大小写；MSTP/BPDU Guard 触发 err-disable 时 oper 非 up。
+- 锐捷/Ruijie：同华三系；部分需开启 `snmp-agent` 与 `bridge-mib allow`。

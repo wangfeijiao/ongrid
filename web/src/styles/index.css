@@ -63,6 +63,7 @@
   .og-select-item[data-highlighted] { background-color: rgb(var(--text) / 0.07); }
   .og-select-item:focus-visible { outline: none; }
   .og-select-item[data-disabled] { @apply pointer-events-none opacity-50; }
+  .og-select-group-label { @apply px-2 pb-1 pt-2 text-[11px] font-medium text-text-faint; }
   .og-select-search { @apply flex h-10 items-center gap-2 border-b border-border px-3; }
   .og-select-search:focus-within { border-color: rgb(var(--text-muted)); }
   .og-select-search input { @apply h-full w-full min-w-0 flex-1 border-0 bg-transparent p-0 text-xs text-text shadow-none placeholder:text-text-faint; }

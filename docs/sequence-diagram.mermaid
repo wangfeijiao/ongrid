@@ -1,0 +1,39 @@
+sequenceDiagram
+    autonumber
+    participant EC as EmbeddedCollector<br/>(embedded.go:54)
+    participant AG as Agent<br/>(biz/agent.go:623)
+    participant TC as TunnelClient<br/>(pkg/tunnel/client.go)
+    participant FB as Frontierbound<br/>(frontierbound/handlers.go)
+    participant MI as MetricIngester<br/>(biz/metric/ingester.go)
+    participant PI as PromIngester<br/>(biz/promwrite/ingester.go)
+    participant ST as MetricStore<br/>(data/metric/store/writer.go)
+
+    loop MetricsInterval
+        AG->>EC: CollectAll(ctx) [gopsutil]
+        EC-->>AG: []CollectorOutput
+        AG->>AG: pushSnapshot→pushOne (:651/:670)
+        AG->>TC: Call(MethodPushHostMetrics) [messages.go:25]
+        TC->>FB: push_host_metrics (:432)
+        FB->>MI: Push()
+        MI->>ST: CreateInBatches(500) (:56)
+        AG->>TC: Call(MethodPushPromSamples) [messages.go:26]
+        TC->>FB: push_prom_samples (:478)
+        FB->>PI: Push() (:103)
+        PI->>PI: write() (:196)
+    end
+
+    Note over FB,PI: 告警链（manager 内部）
+    participant PE as PipelineEvaluator<br/>(biz/alert/pipeline.go)
+    participant UC as AlertUsecase<br/>(biz/alert/usecase.go)
+    participant NR as notify.Router<br/>(pkg/notify/notify.go)
+    participant SD as webhookSender<br/>(pkg/notify/webhook.go)
+
+    loop 30s tick
+        PE->>PE: evaluateMetricAnomaly/Forecast/runVectorRule (phaseA.go)
+        PE->>PE: RecordFiring (:381)
+        PE->>UC: notify (:417) → MaybeNotify (:1349)
+        UC->>UC: silence/cooldown/dampening/inhibition gates
+        UC->>UC: resolveChannels (:1573) → BuildSenderFromChannel (:1536)
+        UC->>NR: Send(msg, channels) (:95)
+        NR->>SD: Send(ctx, msg) [Slack/Feishu/DingTalk/WeCom/Telegram/Webhook]
+    end

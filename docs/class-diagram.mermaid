@@ -1,0 +1,90 @@
+classDiagram
+    class Config {
+        <<internal/pkg/config>>
+        HTTPAddr string
+        MetricsAddr string
+        TunnelAddr string
+        DB DBConfig
+        Notification NotificationConfig
+        Alert AlertConfig
+        Load() Config
+    }
+
+    class Agent {
+        <<internal/edgeagent/biz>>
+        collector Collector
+        client TunnelClient
+        metricsLoop(ctx) error
+        pushSnapshot(out, delivered)
+        pushOne(out) (bool, int)
+    }
+
+    class Collector {
+        <<interface internal/edgeagent/collector>>
+        CollectAll(ctx) ([]CollectorOutput, error)
+    }
+
+    class EmbeddedCollector {
+        CollectAll(ctx) ([]CollectorOutput, error)
+    }
+    class ScrapeCollector {
+        CollectAll(ctx) ([]CollectorOutput, error)
+    }
+    Collector <|.. EmbeddedCollector
+    Collector <|.. ScrapeCollector
+
+    class Plugin {
+        <<interface internal/edgeagent/plugins>>
+        Name() string
+        Configure(cfg) error
+        Start(ctx) error
+        Stop(ctx) error
+        HealthSnapshot() PluginHealth
+    }
+
+    class Wiring {
+        <<internal/manager/service/frontierbound>>
+        EdgeAuthn EdgeAuthenticator
+        EdgeUC *edgebiz.Usecase
+        MetricIngester metricbiz.IngestService
+        PromIngester PromwriteIngester
+    }
+
+    class MetricIngester {
+        <<internal/manager/biz/metric>>
+        Push(ctx, req) error
+    }
+    class PromIngester {
+        <<internal/manager/biz/promwrite>>
+        Push(ctx, req) error
+    }
+
+    class Writer {
+        <<interface internal/manager/biz/metric>>
+        WriteRaw(ctx, []Point) error
+        Write5m(ctx, []Bucket5m) error
+        Write1h(ctx, []Bucket1h) error
+    }
+
+    class Sender {
+        <<interface internal/pkg/notify>>
+        Name() string
+        Send(ctx, Message) error
+    }
+    class Router {
+        channels map[string]Sender
+        Send(ctx, Message, channels...) error
+    }
+    Router o-- Sender
+
+    class Executor {
+        <<interface internal/skill>>
+        Execute(ctx, params) (any, error)
+    }
+
+    Agent --> Collector
+    Agent --> Plugin
+    Wiring --> MetricIngester
+    Wiring --> PromIngester
+    MetricIngester --> Writer
+    PromIngester --> Writer

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -203,8 +204,13 @@ func (s *SubprocessPlugin) stageValidateAndReplace(body []byte) error {
 		return fmt.Errorf("open config directory: %w", err)
 	}
 	defer directory.Close()
-	if err := directory.Sync(); err != nil && !errors.Is(err, syscall.EINVAL) {
-		return fmt.Errorf("sync config directory: %w", err)
+	// Windows 不允许对目录句柄调用 FlushFileBuffers：Sync 会返回
+	// ERROR_ACCESS_DENIED（而非 EINVAL），因此直接跳过目录级 fsync。
+	// 配置文件本身已在上面 tmp.Sync() 落盘，不依赖此处。
+	if runtime.GOOS != "windows" {
+		if err := directory.Sync(); err != nil && !errors.Is(err, syscall.EINVAL) {
+			return fmt.Errorf("sync config directory: %w", err)
+		}
 	}
 	return nil
 }

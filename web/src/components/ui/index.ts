@@ -9,6 +9,7 @@ export { PaginationFooter } from './PaginationFooter';
 export { Button } from './Button';
 export { Select } from './Select';
 export { Autocomplete } from './Autocomplete';
+export type { AutocompleteOption } from './Autocomplete';
 export { RoleSelect, type RoleFilterValue } from './RoleSelect';
 export * from './Checkbox';
 export * from './Switch';

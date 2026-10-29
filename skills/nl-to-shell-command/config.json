@@ -1,0 +1,15 @@
+{
+  "name": "shell-gpt",
+  "displayName": "终端指令 自然语言转命令 智能执行",
+  "encoding_fallback": [
+    "utf-8",
+    "gbk",
+    "gb18030"
+  ],
+  "features": [
+    "cli",
+    "selftest",
+    "dry-run",
+    "error-handling"
+  ]
+}

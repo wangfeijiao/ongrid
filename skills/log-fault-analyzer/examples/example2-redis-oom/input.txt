@@ -1,0 +1,13 @@
+2026-08-30 20:15:30.000 INFO [inventory-service,ghi789] 3210 --- [msg-consumer-1] c.e.i.mq.InventoryConsumer : 开始消费消息, msgId=MSG20260830201530001, topic=inventory_deduct
+2026-08-30 20:15:30.010 INFO [inventory-service,ghi789] 3210 --- [msg-consumer-1] c.e.i.service.InventoryService : 扣减库存, productId=P10086, quantity=2
+2026-08-30 20:15:33.456 ERROR [inventory-service,ghi789] 3210 --- [msg-consumer-1] c.e.i.mq.InventoryConsumer : 消费消息失败, msgId: MSG20260830201533001, topic: inventory_deduct
+org.springframework.data.redis.RedisSystemException: Error in execution; nested exception is io.lettuce.core.RedisCommandExecutionException: OOM command not allowed when used memory > 'maxmemory'.
+	at org.springframework.data.redis.core.RedisTemplate.execute(RedisTemplate.java:225)
+	at org.springframework.data.redis.core.RedisTemplate.opsForValue(RedisTemplate.java:398)
+	at com.example.inventory.service.InventoryService.deductStock(InventoryService.java:56)
+	at com.example.inventory.mq.InventoryConsumer.onMessage(InventoryConsumer.java:34)
+Caused by: io.lettuce.core.RedisCommandExecutionException: OOM command not allowed when used memory > 'maxmemory'.
+2026-08-30 20:15:33.458 WARN [inventory-service,ghi789] 3210 --- [msg-consumer-1] c.e.i.mq.InventoryConsumer : 消息进入重试队列, 当前重试次数: 1/5
+2026-08-30 20:15:38.500 ERROR [inventory-service,ghi789] 3210 --- [msg-consumer-2] c.e.i.mq.InventoryConsumer : 消费消息失败, msgId: MSG20260830201538002
+io.lettuce.core.RedisCommandExecutionException: OOM command not allowed when used memory > 'maxmemory'.
+2026-08-30 20:15:45.000 WARN [inventory-service,ghi789] 3210 --- [msg-consumer-1] c.e.i.mq.InventoryConsumer : 消费延迟增加, 队列积压: 1280 条

@@ -1,0 +1,47 @@
+{
+  "resource_id": "/api/v1/security-baseline-check-hckp/spec",
+  "title": "安全基线核查",
+  "goods_name": "安全基线规范包",
+  "archetype": "audit",
+  "price_fen": 100,
+  "dimensions": [
+    {
+      "name": "账号安全",
+      "weight": 25,
+      "criteria": "口令策略、禁用默认账号"
+    },
+    {
+      "name": "服务加固",
+      "weight": 25,
+      "criteria": "最小化服务与端口"
+    },
+    {
+      "name": "补丁与更新",
+      "weight": 25,
+      "criteria": "及时打补丁"
+    },
+    {
+      "name": "日志与审计",
+      "weight": 25,
+      "criteria": "审计开启与留存"
+    }
+  ],
+  "standards": [
+    "须禁用或改密默认账号",
+    "仅开放必要端口与服务",
+    "高危漏洞须限期修复",
+    "审计日志须开启并留存"
+  ],
+  "benchmarks": {
+    "口令长度": "≥12位复杂度",
+    "高危修复时限": "7天",
+    "日志留存": "≥180天"
+  },
+  "sections": [
+    "合规率总评",
+    "分项核查表",
+    "不合规项",
+    "整改清单"
+  ],
+  "topic": "安全基线核查要点"
+}

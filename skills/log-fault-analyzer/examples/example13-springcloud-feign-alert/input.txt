@@ -1,0 +1,58 @@
+【告警】2026-08-30 23:30:00 【严重】order-service 接口响应超时告警
+服务：order-service
+环境：生产环境
+主机：10.0.1.23
+指标：/api/v1/orders P99 响应时间 5200ms，超过阈值 3000ms
+触发时间：2026-08-30 23:30:00
+告警状态：触发中
+
+2026-08-30 23:30:01.123 ERROR [order-service,abc123,def456] order-service 10.0.1.23 --- [http-nio-8080-exec-45] c.e.o.c.OrderController : 创建订单失败
+feign.RetryableException: Read timed out executing POST http://payment-service/api/v1/pay
+	at feign.FeignException.errorExecuting(FeignException.java:249)
+	at feign.SynchronousMethodHandler.executeAndDecode(SynchronousMethodHandler.java:121)
+	at feign.SynchronousMethodHandler.invoke(SynchronousMethodHandler.java:89)
+	at feign.ReflectiveFeign$FeignInvocationHandler.invoke(ReflectiveFeign.java:100)
+	at com.sun.proxy.$Proxy123.createPayment(Unknown Source)
+	at com.example.order.service.OrderService.createOrder(OrderService.java:89)
+	at com.example.order.controller.OrderController.createOrder(OrderController.java:45)
+Caused by: java.net.SocketTimeoutException: Read timed out
+	at java.net.SocketInputStream.socketRead0(Native Method)
+	at java.net.SocketInputStream.read(SocketInputStream.java:171)
+	at org.apache.http.impl.io.SessionInputBufferImpl.streamRead(SessionInputBufferImpl.java:137)
+
+2026-08-30 23:30:02.456 ERROR [order-service,abc123,def456] order-service 10.0.1.23 --- [http-nio-8080-exec-45] c.e.o.c.OrderController : Hystrix 熔断触发
+com.netflix.hystrix.exception.HystrixRuntimeException: PaymentClient#createPayment(PaymentRequest) timed-out and no fallback available.
+	at com.netflix.hystrix.AbstractCommand$22.call(AbstractCommand.java:819)
+	at com.netflix.hystrix.AbstractCommand$22.call(AbstractCommand.java:804)
+	at rx.internal.operators.OperatorOnErrorResumeNextViaFunction$4.onError(OperatorOnErrorResumeNextViaFunction.java:140)
+Caused by: java.util.concurrent.TimeoutException: null
+	at com.netflix.hystrix.AbstractCommand$9.call(AbstractCommand.java:607)
+
+2026-08-30 23:30:03.789 WARN [payment-service,abc123,def456] payment-service 10.0.1.45 --- [http-nio-8081-exec-12] c.e.p.s.PaymentService : 支付处理慢，耗时 4800ms
+2026-08-30 23:30:04.012 ERROR [payment-service,abc123,def456] payment-service 10.0.1.45 --- [http-nio-8081-exec-12] c.e.p.s.PaymentService : 数据库查询慢
+org.springframework.dao.QueryTimeoutException: StatementCallback; SQL [SELECT * FROM transactions WHERE user_id = ? AND status = 'PENDING' ORDER BY created_at DESC]; nested exception is org.postgresql.util.PSQLException: ERROR: canceling statement due to statement timeout
+	at org.springframework.jdbc.support.SQLExceptionSubclassTranslator.doTranslate(SQLExceptionSubclassTranslator.java:76)
+Caused by: org.postgresql.util.PSQLException: ERROR: canceling statement due to statement timeout
+	at org.postgresql.core.v3.QueryExecutorImpl.receiveErrorResponse(QueryExecutorImpl.java:2553)
+
+【告警】2026-08-30 23:30:05 【警告】payment-service 数据库连接池使用率告警
+服务：payment-service
+指标：HikariPool 活跃连接 48/50，使用率 96%，超过阈值 80%
+触发时间：2026-08-30 23:30:05
+
+2026-08-30 23:30:06.345 ERROR [payment-service,abc123,def456] payment-service 10.0.1.45 --- [http-nio-8081-exec-15] c.e.p.s.PaymentService : Sentinel 限流触发
+com.alibaba.csp.sentinel.slots.block.flow.FlowException: null
+	at com.alibaba.csp.sentinel.slots.block.flow.FlowSlot.checkFlow(FlowSlot.java:56)
+	at com.alibaba.csp.sentinel.slots.block.flow.FlowSlot.entry(FlowSlot.java:41)
+
+2026-08-30 23:30:07.678 WARN [gateway,abc123,def456] gateway 10.0.1.10 --- [reactor-http-epoll-3] o.s.c.g.f.NettyRoutingFilter : 网关路由 503
+org.springframework.cloud.gateway.support.NotFoundException: Unable to find instance for payment-service
+	at org.springframework.cloud.gateway.filter.NettyRoutingFilter.filter(NettyRoutingFilter.java:148)
+
+【告警】2026-08-30 23:30:08 【紧急】payment-service 服务不可用告警
+服务：payment-service
+环境：生产环境
+实例：10.0.1.45:8081
+指标：健康检查连续 3 次失败，服务不可用
+触发时间：2026-08-30 23:30:08
+告警状态：触发中

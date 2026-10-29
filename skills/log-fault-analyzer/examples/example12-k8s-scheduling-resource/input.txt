@@ -1,0 +1,37 @@
+--- K8s Events ---
+2026-08-30T23:00:01Z Normal   Scheduled   pod/payment-service-6f9c8d7e5f-abcde  Successfully assigned default/payment-service-6f9c8d7e5f-abcde to node-worker-03
+2026-08-30T23:00:02Z Normal   Pulling     pod/payment-service-6f9c8d7e5f-abcde  Pulling image "registry.example.com/payment-service:v2.1.0"
+2026-08-30T23:00:05Z Normal   Pulled      pod/payment-service-6f9c8d7e5f-abcde  Successfully pulled image "registry.example.com/payment-service:v2.1.0"
+2026-08-30T23:00:06Z Normal   Created     pod/payment-service-6f9c8d7e5f-abcde  Created container payment-service
+2026-08-30T23:00:07Z Normal   Started     pod/payment-service-6f9c8d7e5f-abcde  Started container payment-service
+
+--- 新 Pod 调度失败 ---
+2026-08-30T23:05:00Z Warning  FailedScheduling  pod/payment-service-6f9c8d7e5f-xyz123  0/6 nodes are available: 3 Insufficient cpu, 2 Insufficient memory, 1 node(s) had taint {node-role.kubernetes.io/master: }, that the pod didn't tolerate.
+2026-08-30T23:05:30Z Warning  FailedScheduling  pod/payment-service-6f9c8d7e5f-xyz123  0/6 nodes are available: 3 Insufficient cpu, 2 Insufficient memory, 1 node(s) had taint {node-role.kubernetes.io/master: }, that the pod didn't tolerate.
+
+--- 节点状态 ---
+2026-08-30T23:10:00Z Normal   NodeNotReady  node/node-worker-05  Node node-worker-05 status is now: NodeNotReady
+2026-08-30T23:10:05Z Warning  ContainerGCFailed  node/node-worker-05  failed to garbage collect containers: rpc error: code = DeadlineExceeded desc = context deadline exceeded
+2026-08-30T23:10:10Z Warning  ImageGCFailed  node/node-worker-05  failed to garbage collect images: rpc error: code = DeadlineExceeded desc = context deadline exceeded
+
+--- HPA 异常 ---
+2026-08-30T23:15:00Z Warning  FailedGetResourceMetric  horizontalpodautoscaler/payment-service-hpa  failed to get cpu utilization: unable to get metrics for resource cpu: unable to fetch metrics from resource metrics API: the server could not find the requested resource (get services http:heapster:)
+2026-08-30T23:15:30Z Warning  FailedComputeMetricsReplicas  horizontalpodautoscaler/payment-service-hpa  invalid metrics (1 invalid out of 1), first error is: failed to get cpu utilization: unable to get metrics for resource cpu
+
+--- 应用日志 ---
+2026-08-30T23:00:10.123Z INFO payment-service-6f9c8d7e5f-abcde payment-service Starting payment-service v2.1.0
+2026-08-30T23:00:11.456Z INFO payment-service-6f9c8d7e5f-abcde payment-service Connecting to Redis at 10.0.2.10:6379
+2026-08-30T23:00:12.789Z ERROR payment-service-6f9c8d7e5f-abcde payment-service Failed to connect to Redis
+io.lettuce.core.RedisConnectionException: Unable to connect to 10.0.2.10:6379
+	at io.lettuce.core.RedisConnectionException.create(RedisConnectionException.java:78)
+	at io.lettuce.core.AbstractRedisClient.initializeChannel(AbstractRedisClient.java:267)
+	at io.lettuce.core.RedisClient.connect(RedisClient.java:214)
+Caused by: io.netty.channel.AbstractChannel$AnnotatedConnectException: Connection refused: /10.0.2.10:6379
+Caused by: java.net.ConnectException: Connection refused
+	at sun.nio.ch.SocketChannelImpl.checkConnect(Native Method)
+	at sun.nio.ch.SocketChannelImpl.finishConnect(SocketChannelImpl.java:717)
+
+2026-08-30T23:00:13.000Z ERROR payment-service-6f9c8d7e5f-abcde payment-service Application startup failed
+org.springframework.beans.factory.BeanCreationException: Error creating bean with name 'redisConfig': Invocation of init method failed; nested exception is io.lettuce.core.RedisConnectionException
+	at org.springframework.beans.factory.annotation.InitDestroyAnnotationBeanPostProcessor.postProcessBeforeInitialization(InitDestroyAnnotationBeanPostProcessor.java:137)
+	... 15 more

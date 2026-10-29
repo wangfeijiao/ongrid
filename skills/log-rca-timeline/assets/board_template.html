@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>__TITLE__</title>
+<style>
+:root{
+  --bg:#f4f6f9; --card:#ffffff; --line:#e3e8ef; --line2:#eef2f6;
+  --ink:#16212e; --ink2:#475569; --ink3:#7c8899;
+  --brand:#0b6b78; --brand-soft:#e3f2f4; --brand-line:#9ad0d5;
+  --warn:#b45309; --warn-soft:#fef4e2; --warn-line:#fbd89a;
+  --danger:#b42318; --danger-soft:#fdeceb; --danger-line:#f3b5b0;
+  --info:#1d4ed8; --info-soft:#e6edff; --info-line:#b6c7f5;
+  --gold:#8a6100; --gold-soft:#fdf5e0; --gold-line:#e8cd8a;
+  --ok:#0f7b3f; --ok-soft:#e7f6ec; --ok-line:#a9dcbd;
+  --radius:12px;
+}
+*{box-sizing:border-box;}
+body{margin:0; padding:0; background:var(--bg); color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:14px; line-height:1.62;}
+.wrap{max-width:1280px; margin:0 auto; padding:24px 20px 60px;}
+a{color:var(--info); text-decoration:none;}
+a:hover{text-decoration:underline;}
+
+header.hd{background:linear-gradient(135deg,#0b6b78 0%,#07474f 100%); border-radius:var(--radius); padding:22px 24px; color:#fff;}
+header.hd h1{margin:0 0 6px; font-size:23px; font-weight:700; letter-spacing:.5px;}
+header.hd .sub{font-size:13px; opacity:.93; margin-bottom:14px;}
+.hd-meta{display:flex; flex-wrap:wrap; gap:8px 12px; font-size:12.5px; opacity:.96;}
+.hd-meta span{background:rgba(255,255,255,.14); padding:3px 10px; border-radius:20px;}
+
+.notice{background:var(--gold-soft); border:1px solid var(--gold-line); border-radius:var(--radius);
+  padding:13px 16px; margin:14px 0 0; font-size:13px; color:var(--gold); line-height:1.7;}
+.notice b{color:#6b4c00;}
+
+.stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin:16px 0;}
+.stat{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px;}
+.stat .k{font-size:12px; color:var(--ink3); margin-bottom:4px;}
+.stat .v{font-size:22px; font-weight:700; color:var(--brand);}
+.stat .v small{font-size:12px; font-weight:500; color:var(--ink3);}
+.stat.neutral .v{color:var(--ink);}
+.stat.danger .v{color:var(--danger);}
+.stat.warnc .v{color:var(--warn);}
+.stat.okc .v{color:var(--ok);}
+
+section{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:18px 20px; margin-bottom:16px;}
+section > h2{margin:0 0 12px; font-size:16px; font-weight:700; display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+section > h2 .tag{font-size:11px; font-weight:600; background:var(--brand-soft); color:var(--brand); padding:2px 8px; border-radius:4px;}
+.sum-list{margin:0; padding-left:20px;}
+.sum-list li{margin-bottom:7px; color:var(--ink2);}
+.sum-list li strong{color:var(--ink);}
+
+.ctrl{display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:10px;}
+.ctrl label{font-size:12.5px; color:var(--ink3);}
+input[type=text]{font:inherit; font-size:13px; padding:6px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); min-width:240px;}
+.chips{display:flex; flex-wrap:wrap; gap:6px;}
+.chip{font-size:12.5px; padding:5px 12px; border:1px solid var(--line); border-radius:20px; background:#fff; cursor:pointer; color:var(--ink2); user-select:none;}
+.chip:hover{border-color:var(--brand-line);}
+.chip.on{background:var(--brand); border-color:var(--brand); color:#fff;}
+.ctrl-row{display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; padding-top:10px; border-top:1px dashed var(--line); margin-top:4px; font-size:12.5px; color:var(--ink3);}
+
+.chartbox{border:1px solid var(--line); border-radius:10px; background:#fcfdfe; padding:10px 12px; overflow-x:auto;}
+.chartbox svg{display:block; width:100%; height:auto; min-width:720px;}
+.legend{display:flex; flex-wrap:wrap; gap:10px 16px; font-size:12px; color:var(--ink2); margin-top:8px;}
+.legend i{display:inline-block; width:12px; height:12px; border-radius:3px; margin-right:5px; vertical-align:-1px;}
+
+.grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(370px,1fr)); gap:14px;}
+.card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:15px 16px; display:flex; flex-direction:column; gap:8px;}
+.card.sev3{border-color:var(--danger-line); background:linear-gradient(180deg,#fff7f6 0%,#fff 52%);}
+.card.sev1{opacity:.9;}
+.c-top{display:flex; align-items:center; gap:6px; flex-wrap:wrap;}
+.badge{font-size:11.5px; padding:2px 9px; border-radius:5px; font-weight:600; white-space:nowrap;}
+.b-type{background:var(--info-soft); color:var(--info); border:1px solid var(--info-line);}
+.b-sev3{background:var(--danger-soft); color:var(--danger); border:1px solid var(--danger-line);}
+.b-sev2{background:var(--warn-soft); color:var(--warn); border:1px solid var(--warn-line);}
+.b-sev1{background:var(--line2); color:var(--ink2); border:1px solid var(--line);}
+.b-svc{background:var(--brand-soft); color:var(--brand); border:1px solid var(--brand-line);}
+.b-time{background:var(--line2); color:var(--ink2); border:1px solid var(--line);}
+.card h3{margin:0; font-size:15px; font-weight:700; line-height:1.45;}
+.why{font-size:12.5px; color:var(--ink2); background:#f8fafc; border-left:3px solid var(--brand-line); padding:7px 11px; border-radius:0 6px 6px 0;}
+.metaline{display:flex; flex-wrap:wrap; gap:4px 14px; font-size:12.5px; color:var(--ink2);}
+.metaline .lb{color:var(--ink3);}
+.samp{font-size:11.5px; color:var(--ink3); background:#f8fafc; border:1px dashed var(--line); border-radius:6px; padding:6px 9px; font-family:Consolas,Menlo,monospace; word-break:break-all;}
+.empty{padding:26px; text-align:center; color:var(--ink3); font-size:13px;}
+.hidden{display:none !important;}
+
+.hyp{border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:12px; background:#fff;}
+.hyp.top{border-color:var(--brand-line); background:linear-gradient(180deg,#f4fbfc 0%,#fff 60%);}
+.hyp-top{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px;}
+.rank{font-size:12px; font-weight:700; color:#fff; background:var(--brand); border-radius:6px; padding:2px 9px;}
+.rank.r2{background:var(--ink3);}
+.hyp h3{margin:0; font-size:15.5px; font-weight:700; flex:1 1 240px;}
+.conf{font-size:11.5px; font-weight:700; padding:2px 9px; border-radius:5px;}
+.conf.A{background:var(--ok-soft); color:var(--ok); border:1px solid var(--ok-line);}
+.conf.B{background:var(--warn-soft); color:var(--warn); border:1px solid var(--warn-line);}
+.conf.C{background:var(--line2); color:var(--ink2); border:1px solid var(--line);}
+.scorewrap{display:flex; align-items:center; gap:10px; margin:6px 0 8px;}
+.scorebar{flex:1 1 180px; height:9px; border-radius:5px; background:var(--line2); overflow:hidden; position:relative;}
+.scorebar i{position:absolute; left:0; top:0; bottom:0; background:var(--brand); border-radius:5px;}
+.scorebar.warnbg i{background:var(--warn);}
+.scorenum{font-size:15px; font-weight:700; color:var(--brand); min-width:56px; text-align:right;}
+.factors{font-size:11.5px; color:var(--ink3);}
+.evlist{margin:0 0 8px; padding-left:18px; font-size:12.5px; color:var(--ink2);}
+.evlist li{margin-bottom:4px;}
+.evlist .st{font-size:11px; padding:1px 6px; border-radius:4px; margin-right:5px;}
+.st.强{background:var(--danger-soft); color:var(--danger);}
+.st.中{background:var(--warn-soft); color:var(--warn);}
+.st.弱{background:var(--line2); color:var(--ink3);}
+.hyp details{margin-top:6px;}
+.hyp summary{cursor:pointer; font-size:12.5px; color:var(--brand); font-weight:600;}
+.hyp details ul{margin:6px 0 0; padding-left:20px; font-size:12.5px; color:var(--ink2);}
+.hyp details li{margin-bottom:4px;}
+.hyp .falsify{font-size:12px; color:var(--ink3); margin-top:6px; border-left:3px solid var(--warn-line); padding:5px 10px; background:var(--warn-soft);}
+
+.tl{position:relative; margin:0; padding:0 0 0 26px; list-style:none;}
+.tl::before{content:""; position:absolute; left:8px; top:6px; bottom:6px; width:2px; background:var(--line);}
+.tl li{position:relative; padding:0 0 16px 6px;}
+.tl li::before{content:""; position:absolute; left:-24px; top:5px; width:12px; height:12px; border-radius:50%;
+  background:#fff; border:3px solid var(--ink3);}
+.tl li.p-start::before{border-color:var(--ink3);}
+.tl li.p-触发::before{border-color:var(--danger);}
+.tl li.p-放大::before{border-color:var(--danger);}
+.tl li.p-变更::before{border-color:var(--info);}
+.tl li.p-发现::before{border-color:var(--warn);}
+.tl li.p-恢复::before{border-color:var(--ok);}
+.tl li.p-观察终点::before{border-color:var(--ink3);}
+.tl .tt{font-size:12px; color:var(--ink3); font-weight:600;}
+.tl .th{font-size:14.5px; font-weight:700; color:var(--ink);}
+.tl .ph{font-size:11px; padding:1px 8px; border-radius:4px; margin-left:6px; background:var(--line2); color:var(--ink2);}
+.tl .ph.触发,.tl .ph.放大{background:var(--danger-soft); color:var(--danger);}
+.tl .ph.恢复{background:var(--ok-soft); color:var(--ok);}
+.tl .ph.变更{background:var(--info-soft); color:var(--info);}
+.tl .ph.发现{background:var(--warn-soft); color:var(--warn);}
+.tl .td{font-size:12.5px; color:var(--ink2); margin-top:3px;}
+
+.flags{margin:0; padding-left:20px; font-size:13px; color:var(--ink2);}
+.flags li{margin-bottom:5px;}
+.srclist{display:flex; flex-wrap:wrap; gap:8px 16px; font-size:12.5px;}
+.srclist .kind{color:var(--ink3); font-size:11.5px;}
+footer{margin-top:20px; padding:16px 20px; background:#fff; border:1px solid var(--line); border-radius:var(--radius); font-size:12.5px; color:var(--ink3); line-height:1.75;}
+footer strong{color:var(--ink2);}
+footer ol{margin:6px 0 0; padding-left:20px;}
+footer li{margin-bottom:4px;}
+@media (max-width:680px){
+  .grid{grid-template-columns:1fr;}
+  .wrap{padding:16px 12px 40px;}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hd">
+    <h1>__TITLE__</h1>
+    <div class="sub">__SUBTITLE__</div>
+    <div class="hd-meta">
+      <span>范围：__SCOPE__</span>
+      <span>时间跨度：__SPAN__</span>
+      <span>窗口粒度：__WINDOW__</span>
+      <span>生成：__GENERATED__</span>
+    </div>
+  </header>
+
+  <div class="notice">
+    <b>结论性质声明：</b>本看板输出的是<b>基于日志统计证据的根因假设排序</b>，不是定论。
+    每条假设都附「验证动作」与「可排除条件」，须与<b>监控指标、调用链、变更记录</b>交叉核对后才能定责。
+    日志只能证明<b>发生了什么、在哪里、什么时候</b>，不能直接证明<b>为什么</b>。
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+  <section>
+    <h2>本期要点 <span class="tag" id="cntTag">—</span></h2>
+    <ul class="sum-list" id="summary"></ul>
+  </section>
+
+  <section>
+    <h2>时间窗聚合序列 <span class="tag">基线 = 中位数 + MAD 稳健估计</span></h2>
+    <div class="ctrl">
+      <label>序列</label>
+      <div class="chips" id="seriesChips"></div>
+    </div>
+    <div class="chartbox" id="chartbox"></div>
+    <div class="legend">
+      <span><i style="background:#9ad0d5"></i>窗口值</span>
+      <span><i style="background:#b42318"></i>异常窗口（稳健 z ≥ 3.5）</span>
+      <span><i style="background:#fbd89a"></i>异常时段区间</span>
+      <span><i style="background:#c9d2dd"></i>基线（中位数）</span>
+    </div>
+    <div class="ctrl-row"><span id="chartStat">—</span></div>
+  </section>
+
+  <section>
+    <h2>异常模式摘要 <span class="tag" id="patTag">—</span></h2>
+    <div class="ctrl">
+      <label>严重度</label>
+      <div class="chips" id="sevChips"></div>
+    </div>
+    <div class="ctrl">
+      <label>模式类型</label>
+      <div class="chips" id="typeChips"></div>
+    </div>
+    <div class="ctrl">
+      <input type="text" id="q" placeholder="搜索模式名 / 服务 / 说明 / 样本日志…">
+      <div class="chips" id="sortChips"></div>
+    </div>
+    <div class="ctrl-row">
+      <span id="filterStat">—</span>
+      <span>严重度按「高 / 中 / 低」分档，高严重度模式优先处置</span>
+    </div>
+    <div style="height:12px;"></div>
+    <div class="grid" id="patGrid"></div>
+    <div class="empty hidden" id="patEmpty">当前筛选条件下没有匹配的异常模式，请放宽严重度或清空搜索词。</div>
+  </section>
+
+  <section>
+    <h2>根因假设排序 <span class="tag" id="hypTag">—</span></h2>
+    <div style="font-size:12.5px;color:var(--ink3);margin-bottom:12px;">
+      评分 = 形态覆盖度 40% + 日志证据强度 28% + 时序先后 14% + 故障形态先验 10% + 集中度 8% − 惩罚项。
+      置信度：A ≥ 65 分，B 40–64 分，C &lt; 40 分。
+    </div>
+    <div id="hypList"></div>
+    <div class="empty hidden" id="hypEmpty">未检出异常模式，因此不给出根因假设。</div>
+  </section>
+
+  <section>
+    <h2>故障时间线 <span class="tag">可复盘</span></h2>
+    <ul class="tl" id="timeline"></ul>
+  </section>
+
+  <section>
+    <h2>待核验项与分析局限</h2>
+    <ul class="flags" id="flags"></ul>
+  </section>
+
+  <section>
+    <h2>方法论参考</h2>
+    <div class="srclist" id="srcList"></div>
+  </section>
+
+  <footer>
+    <strong>复盘与处置要点（请照做）</strong>
+    <ol>
+      <li><b>先止血再定因</b>：回滚、降级、限流、扩容优先，根因分析不阻塞恢复动作。</li>
+      <li><b>时间线对齐三方证据</b>：日志异常起始 ↔ 指标拐点 ↔ 变更/发布记录，三者对不上说明另有隐情。</li>
+      <li><b>逐条验证假设</b>：按排序从上往下执行「验证动作」，命中「可排除条件」立即划掉，不要在未排除的假设上投入。</li>
+      <li><b>区分首发与被拖垮</b>：级联传播中最早恶化的一环才是治理重点，后续环节多为次生。</li>
+      <li><b>补齐可观测性</b>：本次缺失的字段（耗时、服务名、traceId）应列入改进项，否则下次仍要靠猜。</li>
+      <li><b>复盘对事不对人</b>：输出可验收的改进项（负责人 + 截止时间 + 验收标准），并跟踪到闭环。</li>
+    </ol>
+    <div style="margin-top:10px;">本看板全部结论由本地脚本对日志做统计聚合与模式识别得出，未依赖任何外部联网数据；时间均为日志自身时间戳。</div>
+  </footer>
+
+</div>
+
+<script>
+window.__LRT_DATA__ = __DATA_JSON__;
+</script>
+<script>
+(function(){
+  var D = window.__LRT_DATA__ || {};
+  var buckets = D.buckets || [];
+  var patterns = D.patterns || [];
+  var hyps = D.hypotheses || [];
+  var timeline = D.timeline || [];
+  var meta = D.meta || {};
+  var impact = D.impact || {};
+
+  var esc = function(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); };
+  var num = function(v, d){ if (v == null || isNaN(v)) return "—"; return Number(v).toFixed(d == null ? 0 : d); };
+
+  var SEVS = [["高","高"],["中","中"],["低","低"]];
+  var SORTS = [["sev","按严重度"],["time","按时间"],["peak","按峰值"]];
+  var SERIES = [
+    ["total","日志量","条"],
+    ["errors","错误条数","条"],
+    ["error_rate","错误率","%"],
+    ["p95","P95 耗时","ms"]
+  ];
+  var state = { sev:"", type:"", q:"", sort:"sev", series:"total" };
+
+  // ---------------- 统计卡 ----------------
+  var nHigh = patterns.filter(function(p){ return p.sev >= 3; }).length;
+  var stats = [
+    ["解析日志行", num(meta.parsed) + " 行", ""],
+    ["解析率", (meta.parse_rate == null ? "—" : (meta.parse_rate*100).toFixed(1) + "%"), "neutral"],
+    ["时间窗", num(meta.buckets) + " 个", "neutral"],
+    ["异常模式", patterns.length + " 类", patterns.length ? "warnc" : "neutral"],
+    ["高严重度", nHigh + " 类", nHigh ? "danger" : "neutral"],
+    ["影响时长", impact.impact_min == null ? "—" : num(impact.impact_min) + " 分钟", impact.impact_min ? "danger" : "neutral"]
+  ];
+  if (impact.mttd_min != null) stats.push(["MTTD", num(impact.mttd_min) + " 分钟", "warnc"]);
+  if (impact.mttr_min != null) stats.push(["MTTR", num(impact.mttr_min) + " 分钟", "warnc"]);
+  if (hyps.length) stats.push(["Top1 假设分", num(hyps[0].score) + " 分", ""]);
+  document.getElementById("stats").innerHTML = stats.map(function(s){
+    return '<div class="stat ' + s[2] + '"><div class="k">' + esc(s[0]) + '</div><div class="v">' + esc(s[1]) + '</div></div>';
+  }).join("");
+  document.getElementById("cntTag").textContent = "异常模式 " + patterns.length + " 类";
+  document.getElementById("patTag").textContent = "共 " + patterns.length + " 类";
+  document.getElementById("hypTag").textContent = hyps.length ? ("Top1 " + hyps[0].score + " 分") : "无假设";
+
+  document.getElementById("summary").innerHTML = (D.summary||[]).map(function(s){
+    return "<li>" + esc(s) + "</li>"; }).join("") || "<li>（无）</li>";
+
+  // ---------------- 聚合图 ----------------
+  var seriesKey = state.series;
+  function seriesVal(b, k){
+    var v = b[k];
+    if (k === "error_rate") return v == null ? 0 : v * 100;
+    return v == null ? 0 : v;
+  }
+  function drawChart(){
+    var key = state.series;
+    var unit = "";
+    for (var i=0;i<SERIES.length;i++){ if (SERIES[i][0]===key) unit = SERIES[i][2]; }
+    var vals = buckets.map(function(b){ return seriesVal(b, key); });
+    var scale = 1;
+    var maxV = Math.max.apply(null, vals.concat([1]));
+    var W = 1200, H = 260, padL = 54, padR = 12, padT = 18, padB = 42;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+    var n = buckets.length || 1;
+    var bw = Math.max(1.2, plotW / n - 1.4);
+    var anomSet = {};
+    patterns.forEach(function(p){
+      for (var i=0;i<buckets.length;i++){
+        var bt = buckets[i].t;
+        if (bt >= p.window_start - (meta.bucket_size||60) && bt <= p.window_end) anomSet[i] = 1;
+      }
+    });
+    var med = (function(){
+      var ys = vals.slice().sort(function(a,b){return a-b;});
+      if (!ys.length) return 0;
+      var m = Math.floor(ys.length/2);
+      return ys.length % 2 ? ys[m] : (ys[m-1]+ys[m])/2;
+    })();
+    var svg = [];
+    svg.push('<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img">');
+    svg.push('<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="#fcfdfe"/>');
+    // 网格与 y 轴刻度
+    for (var g=0; g<=4; g++){
+      var y = padT + plotH * g / 4;
+      var lv = maxV * (1 - g/4);
+      svg.push('<line x1="' + padL + '" y1="' + y + '" x2="' + (W-padR) + '" y2="' + y + '" stroke="#eef2f6" stroke-width="1"/>');
+      svg.push('<text x="' + (padL-8) + '" y="' + (y+4) + '" text-anchor="end" font-size="11" fill="#7c8899">' + lv.toFixed(lv<10?1:0) + '</text>');
+    }
+    // 异常时段底纹
+    var bands = {};
+    patterns.forEach(function(p){
+      for (var i=0;i<buckets.length;i++){
+        var bt = buckets[i].t, be = bt + (meta.bucket_size||60);
+        if (be > p.window_start && bt < p.window_end) bands[i] = 1;
+      }
+    });
+    Object.keys(bands).forEach(function(k){
+      var i = parseInt(k,10);
+      var x = padL + i * (plotW/n);
+      svg.push('<rect x="' + x.toFixed(2) + '" y="' + padT + '" width="' + (plotW/n).toFixed(2) + '" height="' + plotH + '" fill="#fbd89a" opacity="0.30"/>');
+    });
+    // 柱
+    for (var i=0;i<buckets.length;i++){
+      var v = vals[i];
+      var h = maxV > 0 ? (v / maxV) * plotH : 0;
+      var x = padL + i * (plotW/n);
+      var fill = anomSet[i] ? "#b42318" : "#9ad0d5";
+      svg.push('<rect x="' + x.toFixed(2) + '" y="' + (padT + plotH - h).toFixed(2) + '" width="' + Math.max(1, bw).toFixed(2) +
+               '" height="' + Math.max(0.6, h).toFixed(2) + '" fill="' + fill + '"><title>' +
+               esc(buckets[i].t_label || "") + " · " + v.toFixed(v<10?2:0) + " " + unit + '</title></rect>');
+    }
+    // 基线
+    var yMed = padT + plotH - (maxV>0 ? (med/maxV)*plotH : 0);
+    svg.push('<line x1="' + padL + '" y1="' + yMed.toFixed(2) + '" x2="' + (W-padR) + '" y2="' + yMed.toFixed(2) +
+             '" stroke="#c9d2dd" stroke-width="1.5" stroke-dasharray="5 4"/>');
+    // x 轴标签（首/中/末）
+    var ticks = [0, Math.floor(n/2), n-1];
+    ticks.forEach(function(i){
+      if (i<0 || i>=buckets.length) return;
+      var x = padL + i*(plotW/n) + (plotW/n)/2;
+      svg.push('<text x="' + x.toFixed(1) + '" y="' + (H-14) + '" text-anchor="middle" font-size="11" fill="#7c8899">' +
+               esc((buckets[i].t_label||"").slice(5,16)) + '</text>');
+    });
+    svg.push('</svg>');
+    document.getElementById("chartbox").innerHTML = svg.join("");
+    var nz = 0;
+    for (var i=0;i<buckets.length;i++){ if (anomSet[i]) nz++; }
+    document.getElementById("chartStat").textContent =
+      "序列：" + (SERIES.filter(function(s){return s[0]===key;})[0] || ["",""])[1] +
+      " ｜ 基线（中位数）" + med.toFixed(med<10?2:0) + " " + unit +
+      " ｜ 异常窗口 " + nz + " / " + buckets.length + " 个";
+  }
+
+  // ---------------- 筛选控件 ----------------
+  function chipsHtml(box, items, cur, attr){
+    var html = '<span class="chip' + (cur ? "" : " on") + '" data-' + attr + '="">全部</span>' +
+      items.map(function(it){
+        var v = it[0], l = it[1];
+        return '<span class="chip' + (cur === v ? " on" : "") + '" data-' + attr + '="' + esc(v) + '">' + esc(l) + '</span>';
+      }).join("");
+    document.getElementById(box).innerHTML = html;
+  }
+  function renderControls(){
+    chipsHtml("sevChips", SEVS, state.sev, "sev");
+    var types = [];
+    var seen = {};
+    patterns.forEach(function(p){ if (!seen[p.type]) { seen[p.type] = 1; types.push([p.type, p.name]); } });
+    chipsHtml("typeChips", types, state.type, "type");
+    chipsHtml("sortChips", SORTS, state.sort, "sort");
+    var sh = SERIES.map(function(s){
+      return '<span class="chip' + (state.series === s[0] ? " on" : "") + '" data-series="' + s[0] + '">' + esc(s[1]) + '</span>';
+    }).join("");
+    document.getElementById("seriesChips").innerHTML = sh;
+  }
+
+  // ---------------- 模式卡 ----------------
+  function patternCard(p){
+    var svc = p.service || "—";
+    var peak = (p.peak_value == null ? "—" : p.peak_value) + (p.unit ? " " + p.unit : "");
+    var base = p.baseline == null ? "—" : p.baseline;
+    var ratio = p.ratio == null ? "—" : (p.ratio + " 倍");
+    var span = (p.t_label || "") + " 起 " + (p.duration_min == null ? "—" : p.duration_min) + " 分钟";
+    var samples = (p.samples || []).slice(0,2).map(function(s){
+      return '<div class="samp">' + esc(String(s).slice(0,180)) + '</div>'; }).join("");
+    return '<div class="card sev' + (p.sev||1) + '">'
+      + '<div class="c-top">'
+      + '<span class="badge b-type">' + esc(p.name) + '</span>'
+      + '<span class="badge b-sev' + (p.sev||1) + '">' + esc(p.severity) + '</span>'
+      + '<span class="badge b-svc">' + esc(svc) + '</span>'
+      + '<span class="badge b-time">' + esc(span) + '</span>'
+      + '</div>'
+      + '<div class="metaline"><span><span class="lb">峰值：</span>' + esc(peak) + '</span>'
+      + '<span><span class="lb">基线：</span>' + esc(base) + '</span>'
+      + '<span><span class="lb">倍数：</span>' + esc(ratio) + '</span>'
+      + (p.z != null ? '<span><span class="lb">稳健 z：</span>' + esc(p.z) + '</span>' : "")
+      + '</div>'
+      + '<div class="why">' + esc(p.why || "") + '</div>'
+      + samples
+      + '</div>';
+  }
+  function renderPatterns(){
+    var list = patterns.slice();
+    if (state.sev) list = list.filter(function(p){ return p.severity === state.sev; });
+    if (state.type) list = list.filter(function(p){ return p.type === state.type; });
+    if (state.q){
+      var q = state.q.toLowerCase();
+      list = list.filter(function(p){
+        return [p.name, p.why, p.service, (p.samples||[]).join(" "), p.type]
+          .filter(Boolean).some(function(v){ return String(v).toLowerCase().indexOf(q) >= 0; });
+      });
+    }
+    list.sort(function(a,b){
+      if (state.sort === "time") return a.window_start - b.window_start;
+      if (state.sort === "peak") return (b.peak_value||0) - (a.peak_value||0);
+      return (b.sev||0) - (a.sev||0) || (a.window_start - b.window_start);
+    });
+    document.getElementById("patGrid").innerHTML = list.map(patternCard).join("");
+    var em = document.getElementById("patEmpty");
+    if (list.length) em.classList.add("hidden"); else em.classList.remove("hidden");
+    document.getElementById("filterStat").textContent = "显示 " + list.length + " / " + patterns.length + " 类模式";
+  }
+
+  // ---------------- 假设排序 ----------------
+  function renderHyps(){
+    if (!hyps.length){
+      document.getElementById("hypEmpty").classList.remove("hidden");
+      document.getElementById("hypList").innerHTML = "";
+      return;
+    }
+    document.getElementById("hypList").innerHTML = hyps.map(function(h, i){
+      var cls = h.score >= 65 ? "" : "warnbg";
+      var ev = (h.evidence_items||[]).map(function(e){
+        return '<li><span class="st ' + esc(e.strength || "弱") + '">' + esc(e.strength || "弱") + '</span>'
+          + '<b>' + esc(e.type) + '：</b>' + esc(e.text) + '</li>'; }).join("");
+      return '<div class="hyp' + (i === 0 ? " top" : "") + '">'
+        + '<div class="hyp-top"><span class="rank' + (i === 0 ? "" : " r2") + '">#' + esc(h.rank || (i+1)) + '</span>'
+        + '<h3>' + esc(h.name) + '</h3>'
+        + '<span class="badge b-type">' + esc(h.cat) + '</span>'
+        + '<span class="conf ' + esc(h.confidence) + '">置信度 ' + esc(h.confidence) + '</span>'
+        + '</div>'
+        + '<div class="scorewrap"><div class="scorebar ' + cls + '"><i style="width:' + (h.score||0) + '%"></i></div>'
+        + '<span class="scorenum">' + (h.score||0) + ' 分</span></div>'
+        + '<div class="factors">形态覆盖 ' + num(h.coverage,2) + ' ｜ 证据强度 ' + num(h.evidence,2)
+        + ' ｜ 时序吻合 ' + num(h.temporal,2) + ' ｜ 命中线索 ' + num(h.hits) + ' 条'
+        + (h.first_hit ? ' ｜ 最早线索 ' + esc(h.first_hit) : "") + '</div>'
+        + '<ul class="evlist">' + (ev || "<li>无直接证据</li>") + '</ul>'
+        + '<details><summary>验证动作 / 修复提示（点击展开）</summary><ul>'
+        + (h.verify||[]).map(function(v){ return '<li>' + esc(v) + '</li>'; }).join("")
+        + (h.fix||[]).map(function(v){ return '<li><b>修复：</b>' + esc(v) + '</li>'; }).join("")
+        + '</ul></details>'
+        + '<div class="falsify"><b>可排除条件：</b>' + esc(h.falsify || "—") + '</div>'
+        + '</div>';
+    }).join("");
+  }
+
+  // ---------------- 时间线 ----------------
+  document.getElementById("timeline").innerHTML = timeline.map(function(e){
+    return '<li class="p-' + esc(e.phase) + '">'
+      + '<div class="tt">' + esc(e.t_label) + ' · 来源：' + esc(e.source || "—") + '</div>'
+      + '<div class="th">' + esc(e.title) + '<span class="ph">' + esc(e.phase) + '</span></div>'
+      + '<div class="td">' + esc(e.detail || "") + '</div></li>';
+  }).join("") || '<li>无时间线事件</li>';
+
+  document.getElementById("flags").innerHTML = (D.flags||[]).map(function(f){
+    return "<li>" + esc(f) + "</li>"; }).join("") || "<li>（无）</li>";
+  document.getElementById("srcList").innerHTML = (D.sources||[]).map(function(s){
+    return '<span><a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.name) + '</a>'
+      + '<span class="kind"> ' + esc(s.kind || "") + '</span></span>'; }).join("") || '<span class="kind">无</span>';
+
+  // ---------------- 交互 ----------------
+  document.addEventListener("click", function(e){
+    var t = e.target.closest ? e.target.closest(".chip") : null;
+    if (!t) return;
+    var d = t.dataset || {};
+    if (d.sev !== undefined) { state.sev = d.sev; renderControls(); renderPatterns(); }
+    else if (d.type !== undefined) { state.type = d.type; renderControls(); renderPatterns(); }
+    else if (d.sort !== undefined) { state.sort = d.sort; renderControls(); renderPatterns(); }
+    else if (d.series !== undefined) { state.series = d.series; renderControls(); drawChart(); }
+  });
+  document.getElementById("q").addEventListener("input", function(e){
+    state.q = String(e.target.value || "").trim(); renderPatterns();
+  });
+
+  renderControls();
+  renderPatterns();
+  renderHyps();
+  drawChart();
+})();
+</script>
+</body>
+</html>

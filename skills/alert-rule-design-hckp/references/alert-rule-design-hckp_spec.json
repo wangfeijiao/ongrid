@@ -1,0 +1,47 @@
+{
+  "resource_id": "/api/v1/alert-rule-design-hckp/spec",
+  "title": "监控告警规则设计",
+  "goods_name": "告警规则规范包",
+  "archetype": "plan",
+  "price_fen": 100,
+  "dimensions": [
+    {
+      "name": "告警分级",
+      "weight": 30,
+      "criteria": "按影响分P0-P3"
+    },
+    {
+      "name": "阈值合理",
+      "weight": 25,
+      "criteria": "避免误报与漏报"
+    },
+    {
+      "name": "降噪机制",
+      "weight": 25,
+      "criteria": "聚合、抑制、静默"
+    },
+    {
+      "name": "通知策略",
+      "weight": 20,
+      "criteria": "分级通知与升级"
+    }
+  ],
+  "standards": [
+    "告警须分级并定义响应要求",
+    "阈值须基于基线而非拍脑袋",
+    "须有聚合与抑制降噪",
+    "关键告警须有升级机制"
+  ],
+  "benchmarks": {
+    "P0 响应": "≤5分钟",
+    "告警聚合窗": "5分钟",
+    "误报率目标": "≤10%"
+  },
+  "sections": [
+    "告警分级",
+    "规则与阈值",
+    "降噪策略",
+    "通知与升级"
+  ],
+  "topic": "监控告警规则设计"
+}

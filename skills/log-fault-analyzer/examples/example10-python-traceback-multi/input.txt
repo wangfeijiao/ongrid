@@ -1,0 +1,49 @@
+[2026-08-30 21:00:01,234] INFO in app: Starting data-processing-service v3.1.0
+[2026-08-30 21:00:01,345] INFO in db: Connected to PostgreSQL at 10.0.3.50:5432/analytics
+[2026-08-30 21:00:01,456] INFO in kafka: Subscribed to topic 'data-events', group_id='data-processor'
+[2026-08-30 21:00:05,678] INFO in processor: [task=py-tb-001] Received batch of 500 records
+[2026-08-30 21:00:05,789] INFO in processor: [task=py-tb-001] Processing records, batch_id=BATCH-20260830-001
+[2026-08-30 21:00:06,123] ERROR in processor: [task=py-tb-001] Failed to process batch
+Traceback (most recent call last):
+  File "/app/processor.py", line 156, in process_batch
+    results = self.transform(records)
+  File "/app/processor.py", line 234, in transform
+    return [self.enrich_record(r) for r in records]
+  File "/app/processor.py", line 234, in <listcomp>
+    return [self.enrich_record(r) for r in records]
+  File "/app/processor.py", line 278, in enrich_record
+    user_info = self.user_client.get_user(r['user_id'])
+  File "/app/clients/user_client.py", line 45, in get_user
+    resp = self.session.get(f"{self.base_url}/users/{user_id}", timeout=5)
+  File "/usr/local/lib/python3.11/site-packages/requests/sessions.py", line 602, in get
+    return self.request("GET", url, **kwargs)
+  File "/usr/local/lib/python3.11/site-packages/requests/sessions.py", line 589, in request
+    resp = self.send(prep, **send_kwargs)
+  File "/usr/local/lib/python3.11/site-packages/requests/sessions.py", line 703, in send
+    r = adapter.send(request, **kwargs)
+  File "/usr/local/lib/python3.11/site-packages/requests/adapters.py", line 532, in send
+    raise ConnectionError(err, request=request)
+requests.exceptions.ConnectionError: HTTPSConnectionPool(host='user-service.internal', port=443): Max retries exceeded with url: /users/U30001 (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x7f8a2b3c4d10>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/app/processor.py", line 162, in process_batch
+    self.handle_failure(records, e)
+  File "/app/processor.py", line 312, in handle_failure
+    self.db.save_failed_batch(batch_id, records, str(e))
+  File "/app/db/repository.py", line 89, in save_failed_batch
+    self.conn.execute(sql, params)
+  File "/usr/local/lib/python3.11/site-packages/psycopg2/extras.py", line 236, in execute
+    return super().execute(query, vars)
+psycopg2.errors.DeadlockDetected: deadlock detected
+DETAIL:  Process 12345 waits for ShareLock on transaction 67890; blocked by process 12346.
+Process 12346 waits for ShareLock on transaction 67891; blocked by process 12345.
+HINT:  See server log for query details.
+CONTEXT:  while inserting index tuple (0,123) in relation "failed_batches_batch_id_idx"
+
+[2026-08-30 21:00:06,234] ERROR in processor: [task=py-tb-001] Batch processing completely failed, sending to DLQ
+[2026-08-30 21:00:06,345] WARN in kafka: [task=py-tb-001] Producing to DLQ topic 'data-events-dlq', batch_id=BATCH-20260830-001
+[2026-08-30 21:00:06,567] INFO in processor: [task=py-tb-001] DLQ produce successful, offset=12345
+[2026-08-30 21:00:10,000] INFO in app: Health check: ok, pending_tasks=0, dlq_size=1
+[2026-08-30 21:00:15,000] WARN in db: Connection pool stats: active=8/10, idle=2, waiting=3

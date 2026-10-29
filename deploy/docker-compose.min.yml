@@ -1,0 +1,247 @@
+# ongrid 最小验证栈（Windows 本地开发用）
+#
+# 与完整栈（docker-compose.yml / docker-compose.win-local.yml，12 个服务）的区别：
+#   - 只启动云端主服务 ongrid 一个容器，不需要 MySQL / Qdrant / Frontier /
+#     Prometheus / Grafana / Loki / Tempo / Pyroscope / SearXNG / nginx。
+#   - 数据库使用 SQLite（ONGRID_DB_DIALECT=sqlite），schema 由 gorm AutoMigrate 建立，
+#     免去 MySQL 初始化与健康检查等待，最快验证「镜像能构建、服务能起来、接口能访问」。
+#   - 含 Frontier 长连接网关（3 个容器：frontier / ongrid / web），
+#     因此支持边缘设备纳管 —— 本机跑一个 ongrid-edge 即可接入（见 docs/install/edge.md）。
+#     不带 Prometheus / Grafana / Loki / Tempo 等可观测组件，监控面板会是空的。
+#
+# 用途：快速冒烟验证。正式本地开发请用 docker-compose.win-local.yml。
+# 构建上下文必须是仓库根目录（Dockerfile 会 COPY go.mod / 全仓库 / skills / agents）。
+
+services:
+  # Frontier 长连接网关（upstream singchia/frontier）。edge 与本机的 manager
+  # 都通过它建隧道，是边缘纳管的必需组件：
+  #   40011 servicebound — manager 从容器网络内拨入（不暴露宿主）
+  #   40012 edgebound    — edge 拨入，映射到宿主 40012 供本机 edge 连接
+  frontier:
+    image: docker.cnb.cool/ongridio/ongrid/frontier:1.2.6
+    container_name: ongrid-frontier-min
+    restart: unless-stopped
+    ports:
+      - "${ONGRID_TUNNEL_PORT:-40012}:40012"
+    volumes:
+      - ./install/frontier.yaml:/usr/conf/frontier.yaml:ro
+
+  ongrid:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.ongrid
+      args:
+        VERSION: ${VERSION:-dev}
+    image: ongrid:${VERSION:-dev}
+    container_name: ongrid-min
+    restart: unless-stopped
+    depends_on:
+      frontier:
+        condition: service_started
+        required: true
+      # 向量库：知识库/RAG 的唯一存储。缺它时 main() 仍会按默认值
+      # http://qdrant:6333 建客户端，但 DNS 解析失败 → 知识库写入全挂、
+      # 系统健康页 qdrant 检查报 failed。这里用 service_started 而非
+      # service_healthy：qdrant 镜像不带 curl/wget，健康检查会一直
+      # unhealthy 从而阻塞 ongrid 启动。
+      qdrant:
+        condition: service_started
+        required: true
+
+    # 8080 = HTTP API（对外），9100 = Prometheus /metrics（映射到宿主 9101 避开本机占用）
+    ports:
+      # 变量名刻意加 MIN_ 前缀：deploy/.env 里的 ONGRID_HTTP_PORT=443 会被 compose
+      # 自动加载，若同名会把最小栈的 8080 覆盖成 443（那是完整栈 nginx 的端口）。
+      - "${ONGRID_MIN_HTTP_PORT:-8080}:8080"
+      - "${ONGRID_MIN_METRICS_PORT:-9101}:9100"
+
+    environment:
+      # --- 监听地址 ---
+      ONGRID_HTTP_ADDR: ":8080"
+      ONGRID_METRICS_ADDR: ":9100"
+
+      # --- 数据库：SQLite，数据落在挂载的持久目录里 ---
+      ONGRID_DB_DIALECT: sqlite
+      ONGRID_DB_PATH: /var/lib/ongrid/data/ongrid.db
+
+      # --- 首个管理员（首次启动自动播种） ---
+      ONGRID_ADMIN_EMAIL: ${ONGRID_ADMIN_EMAIL:-admin@ongrid.local}
+      ONGRID_ADMIN_PASSWORD: ${ONGRID_ADMIN_PASSWORD:-ongrid@2026}
+
+      # --- 安全：本地开发默认值，生产必须替换为随机值 ---
+      ONGRID_JWT_SECRET: ${ONGRID_JWT_SECRET:-local-dev-jwt-secret-please-change-me-32chars-min}
+      ONGRID_SECRET_KEY: ${ONGRID_SECRET_KEY:-local-dev-vault-key-please-change-me-32chars}
+
+      # --- 边缘网关：连到上面的 frontier 容器（servicebound 端口） ---
+      # 必须为 false，否则 edge 无处可连：frontier 是 edge 与 manager 之间
+      # 唯一的隧道通道，manager 自己也要以 service 身份拨入 40011。
+      ONGRID_FRONTIER_DISABLED: "false"
+      ONGRID_FRONTIER_ADDR: frontier:40011
+      ONGRID_FRONTIER_SERVICE_NAME: ongrid-manager
+
+      # --- LLM：留空则 AI 会话功能关闭，服务本身照常启动 ---
+      ONGRID_OPENAI_API_KEY: ${ONGRID_OPENAI_API_KEY:-}
+      ONGRID_OPENAI_BASE_URL: ${ONGRID_OPENAI_BASE_URL:-}
+      ONGRID_OPENAI_MODEL: ${ONGRID_OPENAI_MODEL:-gpt-4o}
+
+      # --- 知识库 / RAG 向量模型 ---
+      # 这里刻意不设 local：ONGRID_EMBEDDING_PROVIDER=local 会在 main() 里同步调用
+      # fastembed-go 从 Google Cloud Storage 下载 BGE 模型（downloadFromGcs），
+      # 下载不完成就不会 ListenAndServe —— 国内网络下会直接把启动流程卡死，
+      # 表现为容器活着但 8080 始终不监听。provider 留空走默认的 openai 分支，
+      # 不发网络请求、不阻塞启动；没有配 API key 时只是 RAG 嵌入功能不可用。
+      # 需要用本地嵌入时，先在宿主机执行 make fetch-embedding-model 预拉模型，
+      # 再改成 local 并挂载模型目录（见下方 embeddings 挂载）。
+      ONGRID_EMBEDDING_PROVIDER: ${ONGRID_EMBEDDING_PROVIDER:-}
+      ONGRID_EMBEDDING_MODEL: bge-small-zh-v1.5
+      ONGRID_EMBEDDING_DIM: "512"
+      ONGRID_EMBEDDING_CACHE_DIR: /var/lib/ongrid/embeddings
+
+      # --- 知识库向量库。main.go 的默认值就是 http://qdrant:6333，
+      #     这里显式写出来，避免读代码才知道；容器网络内 qdrant 就是
+      #     下面的 service key，由 docker 内嵌 DNS 解析。
+      ONGRID_QDRANT_URL: ${ONGRID_QDRANT_URL:-http://qdrant:6333}
+
+      # --- 可观测性：指标面板的后端。控制台"指标"页走
+      #     ONGRID_PROM_QUERY_URL 查询，edge 隧道推来的主机指标经
+      #     ONGRID_PROM_REMOTE_WRITE_URL 写入（写端点必须带
+      #     /prometheus/api/v1/write，对应容器 --web.external-url=/prometheus/）。
+      #     缺 Prometheus 时面板会显示 "not wired yet: prometheus disabled"。
+      ONGRID_PROM_ENABLED: "true"
+      ONGRID_PROM_URL: http://prometheus:9090/prometheus
+      ONGRID_PROM_QUERY_URL: http://prometheus:9090/prometheus
+      ONGRID_PROM_REMOTE_WRITE_URL: http://prometheus:9090/prometheus/api/v1/write
+
+      # --- 可观测性：链路（Traces）。查询代理指向下面的 tempo 容器
+      #     （config.go 默认值就是 http://tempo:3200，这里显式写出来）。
+      #     缺 Tempo 时控制台"链路"页会报 lookup tempo: no such host。
+      #     manager 自身的 OTel trace 也会经 ONGRID_OTEL_ENDPOINT（默认
+      #     tempo:4318，OTLP HTTP）推给 Tempo，因此链路页天然有数据。
+      ONGRID_TRACE_QUERY_URL: http://tempo:3200
+
+      # --- 日志（Logs）。查询代理指向下面的 loki 容器（config.go 的
+      #     默认值就是 http://loki:3100）。缺 Loki 时控制台"日志"页报
+      #     "logs backend request failed"。
+      ONGRID_LOG_QUERY_URL: http://loki:3100
+
+      # --- 公网入口。edge 的日志/链路数据面（loki push、otlp traces）
+      #     走 PublicURL + /loki/... 与 /v1/traces（见 main.go
+      #     pluginEndpointResolver）：seed 值 loki:3100 / tempo:4318 是
+      #     docker 内部主机名，edge 不可达，必须给一个 edge 可达的
+      #     nginx 入口，否则两台 edge 不会推日志/链路。
+      #     注意 deploy/.env 里的 ONGRID_PUBLIC_URL=（空）会被 :-( 空)
+      #     默认值语法覆盖回这里的值。
+      ONGRID_PUBLIC_URL: ${ONGRID_PUBLIC_URL_MIN:-http://10.6.54.118:8081}
+
+      # --- ONNX Runtime 共享库路径（镜像内由 Dockerfile 安装） ---
+      ONNX_PATH: /usr/lib/libonnxruntime.so
+
+    volumes:
+      # 单一命名卷承载全部运行时状态：SQLite 数据、知识库仓库克隆、工作区等。
+      # 不用嵌套挂载（父子目录各挂一个卷），避免挂载顺序带来的歧义。
+      - ongrid_min_state:/var/lib/ongrid
+      # 本地向量模型缓存（宿主机目录，避免每次重建都重新下载 BGE 模型）
+      - ..\.cache\embedding-models:/var/lib/ongrid/embeddings
+
+    healthcheck:
+      # 主服务暴露 /healthz（可观测性红线），用它判断容器是否真的可用
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # Prometheus：接收 manager remote_write 进来的 edge 主机指标，
+  # 并作为控制台指标面板的查询后端。必须带 --web.enable-remote-write-receiver，
+  # 否则 manager 的写入会 404。9090 不暴露宿主，控制台经 nginx /api 代理查询。
+  prometheus:
+    image: docker.cnb.cool/ongridio/ongrid/prometheus:v2.54.0
+    container_name: ongrid-prometheus-min
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${ONGRID_PROM_RETENTION_TIME:-2160h}
+      - --storage.tsdb.retention.size=${ONGRID_PROM_RETENTION_SIZE:-20GB}
+      - --web.enable-remote-write-receiver
+      - --web.enable-lifecycle
+      - --web.external-url=/prometheus/
+      - --web.route-prefix=/prometheus/
+    volumes:
+      # 复用完整栈的抓取配置：自抓 + 抓 ongrid:9100（最小栈服务名同名，可直接解析）
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_min_data:/prometheus
+
+  # Tempo（ADR-013）：链路后端。与完整栈同一定义 —— 单二进制，OTLP
+  # gRPC :4317 / HTTP :4318 接收（不映射宿主），manager 经 3200 做查询代理。
+  # metrics_generator 把 spanmetrics remote_write 给上面的 Prometheus，
+  # 让 trace_latency / trace_error_rate 评估器复用既有 Prom 查询路径。
+  tempo:
+    image: docker.cnb.cool/ongridio/ongrid/tempo:2.10.0
+    container_name: ongrid-tempo-min
+    restart: unless-stopped
+    environment:
+      TEMPO_BLOCK_RETENTION: ${ONGRID_TEMPO_BLOCK_RETENTION:-168h}
+    command:
+      - -config.file=/etc/tempo/tempo.yaml
+      - -config.expand-env=true
+    volumes:
+      - ./install/tempo-config.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo_min_data:/var/tempo
+    depends_on:
+      - prometheus
+
+  # Loki（ADR-012）：日志后端。edge 经 nginx /loki/api/v1/push 与
+  # /loki/otlp/v1/logs（auth_request 鉴权）推入，manager 经 3100 做
+  # 查询代理。3100 不映射宿主。
+  loki:
+    image: docker.cnb.cool/ongridio/ongrid/loki:3.4.0
+    container_name: ongrid-loki-min
+    restart: unless-stopped
+    environment:
+      LOKI_RETENTION_PERIOD: ${ONGRID_LOKI_RETENTION_PERIOD:-720h}
+    command:
+      - -config.file=/etc/loki/local-config.yaml
+      - -config.expand-env=true
+    volumes:
+      - loki_min_data:/loki
+      - ./install/loki-config.yaml:/etc/loki/local-config.yaml:ro
+
+  # Qdrant：知识库 / RAG 的向量库（与完整栈同一镜像、同一存储路径）。
+  # ongrid 经 ONGRID_QDRANT_URL=http://qdrant:6333 访问（service key 即
+  # DNS 名）。6333 = REST（ongrid 走这个），6334 = gRPC（未使用，不映射）。
+  # 不映射宿主端口：最小栈只需容器间互通，暴露宿主反而多一个未鉴权入口。
+  # 注意：qdrant 镜像内没有 curl / wget，healthcheck 要么省略要么用
+  # 自带的 /healthz 也不可用 —— 这里省略健康检查，改由 ongrid 侧
+  # systemhealth 的 checkQdrant（GET /collections/knowledge）兜底，
+  # 控制台「系统健康」页可直接看到连通状态。
+  qdrant:
+    image: docker.cnb.cool/ongridio/ongrid/qdrant:v1.11.3
+    container_name: ongrid-qdrant-min
+    restart: unless-stopped
+    volumes:
+      - qdrant_min_data:/qdrant/storage
+
+  # 前端 SPA + nginx。镜像需先构建：
+  #   docker build -f deploy/Dockerfile.web \
+  #     --build-arg NPM_REGISTRY=https://registry.npmmirror.com -t ongrid-web:dev .
+  web:
+    image: ongrid-web:${VERSION:-dev}
+    container_name: ongrid-web-min
+    restart: unless-stopped
+    depends_on:
+      ongrid:
+        condition: service_healthy
+        required: true
+    ports:
+      - "${ONGRID_MIN_WEB_PORT:-8081}:80"
+    volumes:
+      # 覆盖镜像内置的正式 nginx.conf（它依赖 5 个最小栈里不存在的 upstream）
+      - ./nginx/nginx.min.conf:/etc/nginx/nginx.conf:ro
+
+volumes:
+  ongrid_min_state: {}
+  prometheus_min_data: {}
+  tempo_min_data: {}
+  loki_min_data: {}
+  qdrant_min_data: {}

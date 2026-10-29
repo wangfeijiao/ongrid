@@ -1,0 +1,1402 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>服务器运维与安全控制台</title>
+<style>
+:root{
+  --bg:#fafbfc;
+  --surface:#ffffff;
+  --line:#eceff3;
+  --line-strong:#dfe3e8;
+  --text:#1a1d21;
+  --text-2:#5b6470;
+  --text-3:#8b95a1;
+  --accent:#0d7a6f;
+  --accent-soft:#f0faf8;
+  --accent-line:#c7ece5;
+  --crit:#c0392b; --high:#dc5b3e; --med:#c98a06; --low:#3b7dd8; --info:#8b95a1;
+  --ok:#1f9d5b;
+  --r:10px;
+  --shadow:0 1px 2px rgba(16,24,40,.04);
+  --shadow-lg:0 4px 16px rgba(16,24,40,.07);
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--text);
+  font:15px/1.68 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",
+  "Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.2px}
+button{font-family:inherit}
+
+/* ---------- 顶栏 ---------- */
+.top{background:rgba(255,255,255,.86);backdrop-filter:saturate(180%) blur(12px);
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:40}
+.top .in{max-width:1120px;margin:0 auto;padding:13px 24px;display:flex;align-items:center;gap:14px}
+.mark{width:30px;height:30px;border-radius:9px;flex:none;
+  background:linear-gradient(145deg,#12a396,#0a6d63);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;
+  box-shadow:0 2px 6px rgba(13,122,111,.28)}
+.brand{font-size:15px;font-weight:600;line-height:1.25}
+.brand small{display:block;font-weight:400;font-size:11.5px;color:var(--text-3);letter-spacing:.2px}
+.grow{flex:1}
+.pill{font-size:11.5px;padding:4px 10px;border-radius:999px;border:1px solid var(--line-strong);
+  color:var(--text-2);background:#fff;white-space:nowrap}
+
+/* ---------- 布局 ---------- */
+.wrap{max-width:1120px;margin:0 auto;padding:26px 24px 96px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  padding:20px 22px;box-shadow:var(--shadow);margin-bottom:14px}
+.card > h3{font-size:15px;margin-bottom:3px}
+.hint{color:var(--text-2);font-size:13px;margin-bottom:16px;line-height:1.7}
+.sec-num{display:inline-flex;align-items:center;justify-content:center;width:19px;height:19px;
+  border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:11.5px;
+  font-weight:700;margin-right:8px;vertical-align:1px}
+.hidden{display:none!important}
+.grid{display:grid;gap:14px}
+.g2{grid-template-columns:1fr 1fr}
+.g3{grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+@media(max-width:800px){.g2{grid-template-columns:1fr}.wrap{padding:20px 16px 80px}
+  .top .in{padding:11px 16px}}
+
+/* ---------- 按钮 ---------- */
+.btn{border:1px solid var(--line-strong);background:#fff;color:var(--text);border-radius:8px;
+  padding:7px 14px;font-size:13.5px;cursor:pointer;transition:.15s;white-space:nowrap}
+.btn:hover{background:#f7f9fa;border-color:#cfd6dd}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;
+  box-shadow:0 1px 2px rgba(13,122,111,.2)}
+.btn.primary:hover{background:#0a6259;border-color:#0a6259}
+.btn.quiet{border-color:transparent;background:transparent;color:var(--text-2)}
+.btn.quiet:hover{background:#f2f5f7;color:var(--text)}
+.btn.danger{background:var(--crit);border-color:var(--crit);color:#fff;font-weight:600}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.sm{padding:5px 11px;font-size:12.5px}
+
+/* ---------- 分段控件 ---------- */
+.tabs{display:inline-flex;gap:2px;background:#eef1f4;padding:3px;border-radius:9px;margin:20px 0 18px}
+.tabs button{border:none;background:transparent;padding:7px 18px;border-radius:7px;font-size:13.5px;
+  cursor:pointer;color:var(--text-2);transition:.15s}
+.tabs button.on{background:#fff;color:var(--text);font-weight:600;box-shadow:var(--shadow)}
+.subtabs{display:flex;gap:20px;border-bottom:1px solid var(--line);margin:0 0 18px}
+.subtabs button{background:none;border:none;padding:10px 0;font-size:13.5px;color:var(--text-2);
+  cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:.15s}
+.subtabs button.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+
+/* ---------- 本领 ---------- */
+.power{background:linear-gradient(180deg,#fbfefd 0%,#ffffff 62%);
+  border:1px solid var(--accent-line);box-shadow:var(--shadow-lg)}
+.power .head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:4px}
+.power h2{font-size:17px}
+.power .lead{color:var(--text-2);font-size:13.5px;margin-bottom:18px;max-width:760px}
+.pw-grid{display:grid;gap:1px;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));
+  background:var(--line);border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.pw{background:#fff;padding:15px 16px}
+.pw .t{display:flex;align-items:center;gap:9px;font-weight:600;font-size:14px;margin-bottom:5px}
+.pw .t em{font-style:normal;font-size:15px;width:22px;text-align:center;flex:none}
+.pw .d{font-size:12.5px;color:var(--text-2);line-height:1.65;margin:0}
+.pw details{margin-top:7px}
+.pw summary{font-size:12px;color:var(--accent);cursor:pointer;list-style:none}
+.pw summary::-webkit-details-marker{display:none}
+.pw summary::before{content:"＋ "}
+.pw details[open] summary::before{content:"－ "}
+.pw ul{margin:7px 0 0;padding-left:16px;font-size:12.5px;color:var(--text-2);line-height:1.8}
+.pw ul li::marker{color:var(--accent-line)}
+
+/* ---------- 表单 ---------- */
+label.f{display:block;font-size:12px;color:var(--text-2);margin-bottom:6px;font-weight:600;
+  letter-spacing:.2px}
+input[type=text],input[type=number],textarea,select{
+  width:100%;padding:8px 11px;border:1px solid var(--line-strong);border-radius:8px;font-size:14px;
+  background:#fff;color:var(--text);font-family:inherit;transition:.15s}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent);
+  box-shadow:0 0 0 3px rgba(13,122,111,.08)}
+textarea{font:13px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;resize:vertical}
+.toggles{display:flex;gap:9px;flex-wrap:wrap}
+.tog{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line-strong);
+  border-radius:8px;padding:7px 13px;font-size:13px;cursor:pointer;background:#fff;
+  user-select:none;transition:.15s;color:var(--text-2)}
+.tog:hover{border-color:#cfd6dd}
+.tog.on{border-color:var(--accent-line);background:var(--accent-soft);color:#0a5b52;font-weight:600}
+.tog input{margin:0;accent-color:var(--accent);width:14px;height:14px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+.row > *{flex:1;min-width:140px}
+
+/* ---------- 日志 ---------- */
+.log{background:#161b22;color:#b9c2cc;border-radius:9px;padding:14px 16px;
+  font:12.5px/1.7 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  height:220px;overflow:auto;white-space:pre-wrap;word-break:break-all;
+  border:1px solid #22282f}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid #d5dbe0;
+  border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-1px}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* ---------- 结果 ---------- */
+.hero{display:flex;gap:28px;align-items:center;flex-wrap:wrap}
+.gauge{width:126px;height:126px;position:relative;flex:none}
+.gauge svg{transform:rotate(-90deg);display:block}
+.gauge .v{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center}
+.gauge .v b{font-size:35px;line-height:1;letter-spacing:-1.5px;font-weight:700}
+.gauge .v span{font-size:11px;color:var(--text-3);margin-top:4px;letter-spacing:.3px}
+.hero-r{flex:1;min-width:290px}
+.sevs{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.sev{border:1px solid var(--line);border-radius:9px;padding:9px 13px;background:#fff;min-width:86px}
+.sev .n{font-size:19px;font-weight:700;line-height:1.1}
+.sev .l{font-size:11px;color:var(--text-3);letter-spacing:.3px}
+.note{border-radius:9px;padding:12px 15px;font-size:13.5px;border:1px solid;margin-bottom:12px;
+  line-height:1.7}
+.note.danger{background:#fdf3f2;border-color:#f3d3ce;color:#8a2a1e}
+.note.warn{background:#fdf9ee;border-color:#f0e2bd;color:#7a5606}
+.note.info{background:#f2f7fd;border-color:#d5e4f5;color:#24507e}
+.note.ok{background:#f1faf5;border-color:#cceada;color:#14603a}
+
+.f{border:1px solid var(--line);border-left-width:3px;border-radius:9px;background:#fff;
+  padding:14px 16px;margin-bottom:9px;transition:.15s}
+.f:hover{border-color:var(--line-strong);border-left-color:inherit;box-shadow:var(--shadow)}
+.f .hd{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.f .ti{font-weight:600;font-size:14.5px}
+.tag{font-size:11px;padding:2px 8px;border-radius:5px;border:1px solid var(--line);
+  color:var(--text-3);background:#fbfcfd;white-space:nowrap}
+.tag.mono{font-family:ui-monospace,Menlo,monospace}
+.tag.auto{color:#14603a;border-color:#cceada;background:#f1faf5}
+.ev{margin-top:10px;padding:10px 12px;background:#f8fafb;border:1px solid var(--line);
+  border-radius:7px;font:12px/1.65 ui-monospace,Menlo,monospace;white-space:pre-wrap;
+  word-break:break-all;color:#48525e;max-height:180px;overflow:auto}
+.blk{margin-top:10px}
+.blk > b{display:block;font-size:11px;color:var(--text-3);letter-spacing:.6px;
+  text-transform:uppercase;margin-bottom:4px;font-weight:700}
+.fix{white-space:pre-wrap;background:#f5fbf7;border-left:3px solid var(--ok);padding:9px 11px;
+  border-radius:0 6px 6px 0;font:12.5px/1.65 ui-monospace,Menlo,monospace;color:#1c5237}
+.imp{background:#fafbfc;border-left:3px solid #d5dbe0;padding:9px 11px;
+  border-radius:0 6px 6px 0;font-size:13.5px;color:#3d4650}
+
+.phase{border:1px solid var(--line);border-radius:9px;background:#fff;padding:16px 18px;
+  margin-bottom:11px}
+.phase .ph{display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px}
+.phase .pd{color:var(--text-2);font-size:12.5px;margin:4px 0 12px}
+.pitem{border-top:1px solid var(--line);padding:12px 0}
+.pitem:first-of-type{border-top:none;padding-top:2px}
+.pitem .pt{font-weight:600;margin-bottom:6px;font-size:14px;display:flex;gap:8px;
+  align-items:baseline;flex-wrap:wrap}
+.pitem .kv{display:grid;grid-template-columns:54px 1fr;gap:4px 10px;font-size:13px}
+.pitem .kv span:nth-child(odd){color:var(--text-3);font-size:12px;padding-top:1px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;word-break:break-all}
+
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--text-3);font-size:11.5px;background:#fbfcfd;font-weight:700;
+  letter-spacing:.4px;text-transform:uppercase}
+tr:last-child td{border-bottom:none}
+.empty{color:var(--text-3);font-size:13.5px;padding:26px 0;text-align:center}
+
+/* ---------- 硬盘瘦身 ---------- */
+.tagline{font-weight:400;font-size:12.5px;color:var(--text-3);margin-left:10px;
+  letter-spacing:0}
+.clrow{border:1px solid var(--line);border-radius:9px;background:#fff;padding:12px 14px;
+  margin-bottom:8px;display:flex;gap:12px;align-items:flex-start;transition:.15s}
+.clrow.sel{border-color:var(--accent-line);background:var(--accent-soft)}
+.clrow.off{opacity:.55}
+.clrow .cb{margin-top:3px;accent-color:var(--accent);width:15px;height:15px;flex:none}
+.clrow .body{flex:1;min-width:0}
+.clrow .ttl{display:flex;gap:9px;align-items:baseline;flex-wrap:wrap;font-weight:600;
+  font-size:14px}
+.clrow .sz{font-family:ui-monospace,Menlo,monospace;font-size:13px;color:var(--text-2)}
+.clrow .nt{font-size:12.5px;color:var(--text-3);line-height:1.7;margin-top:6px}
+.clrow .cmd{margin-top:7px;background:#f8fafb;border:1px solid var(--line);border-radius:6px;
+  padding:7px 10px;font:12px/1.6 ui-monospace,Menlo,monospace;color:#48525e;
+  word-break:break-all}
+.risk{font-size:11px;padding:2px 8px;border-radius:5px;border:1px solid;font-weight:700;
+  white-space:nowrap}
+.risk.SAFE{color:#0a5b52;border-color:#bfe3dc;background:#eef8f6}
+.risk.LIKELY{color:#7a5606;border-color:#f0e2bd;background:#fdf9ee}
+.risk.CAUTION{color:#8a2a1e;border-color:#f3d3ce;background:#fdf3f2}
+.usedisk{display:flex;align-items:baseline;gap:10px;font-size:13.5px;flex-wrap:wrap}
+.usedisk .m{font-family:ui-monospace,Menlo,monospace;font-weight:600;min-width:64px}
+.usedisk .p{color:var(--text-3);font-size:12.5px}
+.bar{height:7px;border-radius:4px;background:#eef1f4;overflow:hidden;margin-top:7px}
+.bar i{display:block;height:100%;border-radius:4px}
+.diskrow{padding:11px 0;border-bottom:1px solid var(--line)}
+.diskrow:last-child{border-bottom:none}
+
+.warnbox{background:#fdf3f2;border:1px solid #f3d3ce;border-radius:9px;padding:14px 16px;
+  font-size:13.5px;color:#8a2a1e;line-height:1.75}
+.okbox{background:#f1faf5;border:1px solid #cceada;border-radius:9px;padding:14px 16px;
+  font-size:13.5px;color:#14603a;line-height:1.75}
+.toast{position:fixed;right:24px;bottom:24px;background:#1a1d21;color:#fff;padding:11px 18px;
+  border-radius:9px;font-size:13.5px;opacity:0;transform:translateY(10px);
+  transition:.25s cubic-bezier(.2,.8,.2,1);pointer-events:none;z-index:99;
+  box-shadow:0 8px 28px rgba(0,0,0,.2)}
+.toast.on{opacity:1;transform:none}
+/* 出错原因提示条：报错时把「原因 / 处理 / 影响」摆出来，而不是闪一下就没了 */
+.errbar{position:sticky;top:0;z-index:45;background:#fff5f4;border-bottom:1px solid #f3cfc9;
+  color:#7d2418;font-size:13.5px;line-height:1.7;padding:12px 24px}
+.errbar .in{max-width:1120px;margin:0 auto}
+.errbar b{color:#b03325}
+.errbar .e2{color:#8a4a3f}
+.errbar .e3{color:var(--text-3);font-size:12.5px}
+.foot{color:var(--text-3);font-size:12px;text-align:center;margin-top:36px;line-height:2}
+</style>
+</head>
+<body>
+
+<div class="top"><div class="in">
+  <img src="assets/logo.png" alt="诺盾网络" style="width:34px;height:34px;border-radius:8px;flex:none;object-fit:contain;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.12)">
+  <div class="brand">服务器安全维护 · 杀木马病毒控制台<small>诺盾网络 · 作者：泰安诺盾 仇苏毅 · <span id="envline">正在读取本机环境…</span></small></div>
+  <div class="grow"></div>
+  <span class="pill" id="adminBadge">检测中</span>
+  <button class="btn quiet sm" onclick="shutdown()">关闭</button>
+</div></div>
+
+<div class="wrap">
+
+<!-- ==================== 本领 ==================== -->
+<div class="card power">
+  <div class="head">
+    <h2>这个技能能为你做什么</h2>
+    <span class="pill">全部只读体检 · 变更需二次确认</span>
+  </div>
+  <div class="lead">从体检、优化、加固，到备份、查毒、崩溃溯源，一台机器的完整运维闭环。
+    所有结论都基于本机真实读到的数据，并且会明确告诉你<b>哪些东西没查到</b>。</div>
+
+  <div class="pw-grid">
+    <div class="pw">
+      <div class="t"><em>⚡</em>性能优化</div>
+      <p class="d">定位 CPU / 内存 / 磁盘的真实瓶颈，给出可直接执行的调优值。</p>
+      <details><summary>展开细节</summary><ul>
+        <li>磁盘队列、%Disk Time、换页速率采样判读</li>
+        <li>后台预读 / 索引 / 无用服务识别</li>
+        <li>内核参数与文件句柄上限调优（给具体数值）</li>
+        <li>按内存占用排序进程，区分正常吃内存与泄漏</li>
+      </ul></details>
+    </div>
+    <div class="pw">
+      <div class="t"><em>🛡</em>安全体检与加固</div>
+      <p class="d">账户、防火墙、补丁、暴露面全面核查，并生成可回滚的加固脚本。</p>
+      <details><summary>展开细节</summary><ul>
+        <li>口令策略、锁定阈值、权限扩散、空口令账户</li>
+        <li>防火墙 / SMBv1 / RDP / SSH / UAC / 补丁基线</li>
+        <li>数据库与缓存端口暴露面识别</li>
+        <li>加固脚本 + 回滚脚本，改前自动打配置快照</li>
+      </ul></details>
+    </div>
+    <div class="pw">
+      <div class="t"><em>🦠</em>病毒木马后门</div>
+      <p class="d">从持久化、落地样本、提权后门三条线排查，并给出清除顺序。</p>
+      <details><summary>展开细节</summary><ul>
+        <li>自启动项 / 计划任务 / 服务 / WMI 订阅 / LSA 包</li>
+        <li>cron、systemd、ld.so.preload、SSH 公钥后门</li>
+        <li>临时目录落地样本、SUID 提权后门、内存马特征</li>
+        <li>强调先取证再清除，避免破坏证据</li>
+      </ul></details>
+    </div>
+    <div class="pw">
+      <div class="t"><em>🧹</em>硬盘瘦身</div>
+      <p class="d">只读扫描找出空间去哪了，按风险分级，清理先进隔离区可还原。</p>
+      <details><summary>展开细节</summary><ul>
+        <li>临时文件 / 更新缓存 / 日志 / 包缓存 / 崩溃转储 / 缩略图 / 回收站</li>
+        <li>大文件与重复文件定位（只报告，不代你决定）</li>
+        <li>三级判定：安全 / 建议 / 谨慎，逐类点名才执行</li>
+        <li>默认移入隔离区而非删除，附还原脚本；确认无碍再销毁</li>
+      </ul></details>
+    </div>
+    <div class="pw">
+      <div class="t"><em>🚀</em>上网提速</div>
+      <p class="d">揪出本机侧的网络拖累，给出可回滚的调优脚本。</p>
+      <details><summary>展开细节</summary><ul>
+        <li>网卡协商速率、丢包与错误计数（物理层先修）</li>
+        <li>DNS 实测对比；延迟与抖动的 min/avg/max</li>
+        <li>Linux BBR 拥塞控制、TCP 窗口与缓冲区</li>
+        <li>后台偷流量、代理残留、hosts 被改</li>
+      </ul></details>
+    </div>
+    <div class="pw">
+      <div class="t"><em>🧯</em>日志与崩溃诊断</div>
+      <p class="d">蓝屏、内核崩溃、OOM、JVM 崩溃都有对应的定位路径。</p>
+      <details><summary>展开细节</summary><ul>
+        <li>minidump / MEMORY.DMP / core 文件盘点</li>
+        <li>OOM kill、段错误、I/O 错误、意外断电回溯</li>
+        <li>JVM hs_err 与堆外内存问题识别</li>
+        <li>审计日志被清空等入侵痕迹识别</li>
+      </ul></details>
+    </div>
+    <div class="pw">
+      <div class="t"><em>💾</em>主动备份</div>
+      <p class="d">带哈希清单的备份，可校验、可恢复、可定时，改动前自动兜底。</p>
+      <details><summary>展开细节</summary><ul>
+        <li>按平台自动挑选重要文件（配置、密钥、站点、库）</li>
+        <li>每份备份生成 sha256 清单，校验不怕损坏</li>
+        <li>增量、压缩、保留策略</li>
+        <li>一键生成每日定时备份任务脚本</li>
+      </ul></details>
+    </div>
+    <div class="pw">
+      <div class="t"><em>🖥</em>远程 Linux / UNIX</div>
+      <p class="d">SSH 下发只读探针，目标机不留任何文件；UNIX 也能跑。</p>
+      <details><summary>展开细节</summary><ul>
+        <li>探针纯 POSIX sh，AIX / Solaris / macOS / BSD 可用</li>
+        <li>本机与远程共用同一套判定规则，口径一致</li>
+        <li>采集缺口列成「未覆盖清单」，不假装查过</li>
+        <li>无需在目标机安装任何依赖</li>
+      </ul></details>
+    </div>
+    <div class="pw">
+      <div class="t"><em>🧩</em>IIS / Tomcat / 数据库</div>
+      <p class="d">识别站点与实例，体检 JVM 参数与数据库暴露面。</p>
+      <details><summary>展开细节</summary><ul>
+        <li>IIS 站点、应用程序池、Tomcat 实例盘点</li>
+        <li>JVM 堆大小、堆外内存、编码、OOM dump 配置</li>
+        <li>MySQL / PostgreSQL / Redis / MongoDB 服务状态</li>
+        <li>配套部署与调优模板，避免默认配置上线</li>
+      </ul></details>
+    </div>
+    <div class="pw">
+      <div class="t"><em>📋</em>可执行的处置计划</div>
+      <p class="d">结论自动排优先级，每条都带证据、验收标准和回滚方式。</p>
+      <details><summary>展开细节</summary><ul>
+        <li>P0 立即处置 → P3 择机优化，不是一堆噪音</li>
+        <li>每条：证据 / 动作 / 验收 / 回滚 / 生效条件</li>
+        <li>一键导出 HTML 报告，可打印、可交付、可归档</li>
+        <li>健康分与等级，用于前后对比确认真的改好了</li>
+      </ul></details>
+    </div>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="on" data-tab="audit">体检与优化</button>
+  <button data-tab="clean">硬盘瘦身</button>
+  <button data-tab="net">上网提速</button>
+  <button data-tab="hunt">木马查杀</button>
+  <button data-tab="backup">备份</button>
+  <button data-tab="harden">加固</button>
+  <button data-tab="errors">错误日志</button>
+</div>
+
+<!-- ==================== 体检 ==================== -->
+<section id="tab-audit">
+
+  <div class="card">
+    <h3><span class="sec-num">1</span>体检目标</h3>
+    <div class="hint">本机 = 这台电脑。远程 = 通过 SSH 巡检 Linux / UNIX 服务器（只读探针，不落盘）。</div>
+    <div class="toggles">
+      <label class="tog on" id="chipLocal"><input type="radio" name="tgt" value="local" checked>本机</label>
+      <label class="tog" id="chipSsh"><input type="radio" name="tgt" value="ssh">远程 Linux / UNIX</label>
+    </div>
+    <div id="sshFields" class="grid g3 hidden" style="margin-top:16px">
+      <div><label class="f">主机 / IP</label><input type="text" id="host" placeholder="192.168.1.10"></div>
+      <div><label class="f">用户名</label><input type="text" id="user" value="root"></div>
+      <div><label class="f">端口</label><input type="number" id="port" value="22"></div>
+      <div><label class="f">私钥路径（推荐）</label><input type="text" id="key" placeholder="~/.ssh/id_rsa"></div>
+    </div>
+    <div id="sshNote" class="note info hidden" style="margin:14px 0 0">
+      建议使用<b>密钥认证</b>：脚本以 BatchMode 运行，不会交互式询问密码。
+      若必须用密码，本机需装有 <span class="mono">sshpass</span>（或 Windows 上的 <span class="mono">plink</span>）。
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><span class="sec-num">2</span>体检范围</h3>
+    <div class="hint">不确定就用「全面体检」。整个过程只读，不会修改目标机任何配置。</div>
+    <div class="toggles" id="scopes">
+      <label class="tog on"><input type="checkbox" value="all" checked>全面体检</label>
+      <label class="tog"><input type="checkbox" value="perf">性能</label>
+      <label class="tog"><input type="checkbox" value="sec">安全</label>
+      <label class="tog"><input type="checkbox" value="malware">恶意代码</label>
+      <label class="tog"><input type="checkbox" value="crash">崩溃稳定性</label>
+      <label class="tog"><input type="checkbox" value="log">日志</label>
+    </div>
+    <div class="toggles" style="margin-top:10px">
+      <label class="tog"><input type="checkbox" id="deep">深扫模式（慢，能挖内存马与无文件持久化）</label>
+      <label class="tog"><input type="checkbox" id="quick">快速模式（采样时间减半）</label>
+    </div>
+    <div style="margin-top:16px;max-width:260px">
+      <label class="f">日志回溯窗口（小时）</label><input type="number" id="logHours" value="48">
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><span class="sec-num">3</span>开始体检</h3>
+    <div class="hint">过程会实时打印进度。远程主机含两次采样，通常 30 秒到 3 分钟。</div>
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <button class="btn primary" id="btnRun" onclick="runAudit()">开始体检</button>
+      <span id="runState" style="font-size:13px;color:var(--text-3)"></span>
+    </div>
+    <div class="log" id="log" style="margin-top:16px">等待开始…</div>
+  </div>
+
+  <div id="results" class="hidden">
+    <div class="subtabs">
+      <button class="on" data-sub="overview">总览</button>
+      <button data-sub="plan">处置计划</button>
+      <button data-sub="findings">问题明细</button>
+    </div>
+
+    <div id="sub-overview">
+      <div class="card">
+        <div class="hero">
+          <div class="gauge">
+            <svg width="126" height="126">
+              <circle cx="63" cy="63" r="53" fill="none" stroke="#eef1f4" stroke-width="11"></circle>
+              <circle id="arc" cx="63" cy="63" r="53" fill="none" stroke="#0d7a6f" stroke-width="11"
+                stroke-linecap="round" stroke-dasharray="333" stroke-dashoffset="333"></circle>
+            </svg>
+            <div class="v"><b id="scoreVal">–</b><span>健康分 / 100</span></div>
+          </div>
+          <div class="hero-r">
+            <div id="verdict"></div>
+            <div class="sevs" id="sevCards"></div>
+            <div class="mono" id="hostLine" style="margin-top:14px;color:var(--text-3)"></div>
+          </div>
+        </div>
+        <div style="margin-top:20px;display:flex;gap:9px;flex-wrap:wrap">
+          <button class="btn primary" onclick="exportFile('html')">导出 HTML 报告</button>
+          <button class="btn" onclick="exportFile('json')">导出 JSON</button>
+          <button class="btn" onclick="window.open(lastHtml,'_blank')">新窗口打开报告</button>
+          <button class="btn quiet" onclick="copySummary()">复制摘要</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>问题分布</h3>
+        <table id="catTable" style="margin-top:8px"><tbody></tbody></table>
+      </div>
+    </div>
+
+    <div id="sub-plan" class="hidden"></div>
+
+    <div id="sub-findings" class="hidden">
+      <div class="card">
+        <div class="toggles" style="margin-bottom:16px" id="filterBar">
+          <label class="tog on" data-f="all">全部</label>
+          <label class="tog" data-f="CRITICAL">严重</label>
+          <label class="tog" data-f="HIGH">高危</label>
+          <label class="tog" data-f="MEDIUM">中危</label>
+          <label class="tog" data-f="LOW">低危</label>
+          <label class="tog" data-f="INFO">提示</label>
+          <label class="tog" data-f="perf">性能</label>
+          <label class="tog" data-f="sec">安全</label>
+          <label class="tog" data-f="malware">恶意代码</label>
+          <label class="tog" data-f="crash">稳定性</label>
+        </div>
+        <div id="findingList"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 备份 ==================== -->
+<section id="tab-backup" class="hidden">
+  <div class="card">
+    <h3>主动备份</h3>
+    <div class="hint">备份源留空则使用平台默认的重要文件清单。备份完成后会自动做一次哈希校验，
+      校验才是备份可信的依据 —— 没校验过的备份不能算备份。</div>
+    <div class="grid g2">
+      <div><label class="f">备份输出目录</label><input type="text" id="bkDest"></div>
+      <div><label class="f">标签</label><input type="text" id="bkLabel" value="manual"></div>
+    </div>
+    <div style="margin-top:14px">
+      <label class="f">备份源（一行一个，留空使用默认清单）</label>
+      <textarea id="bkSources" rows="4" placeholder="留空即用默认清单"></textarea>
+    </div>
+    <div style="margin-top:16px;display:flex;gap:9px;flex-wrap:wrap">
+      <button class="btn primary" onclick="runBackup()">立即备份并校验</button>
+      <button class="btn" onclick="loadBackups()">刷新历史备份</button>
+      <button class="btn" onclick="genSchedule()">生成每日定时脚本</button>
+    </div>
+    <div class="log" id="bkLog" style="margin-top:16px">等待操作…</div>
+  </div>
+  <div class="card">
+    <h3>历史备份</h3>
+    <div id="bkList" style="margin-top:8px"><div class="empty">点「刷新历史备份」查看</div></div>
+  </div>
+</section>
+
+<!-- ==================== 硬盘瘦身 ==================== -->
+<section id="tab-clean" class="hidden">
+
+  <div class="card">
+    <h3><span class="sec-num">1</span>只读扫描</h3>
+    <div class="hint">扫描全程只读，不移动、不删除任何文件，只负责告诉你空间去哪了。</div>
+    <div class="toggles">
+      <label class="tog on"><input type="checkbox" id="clBig" checked>附带大文件定位</label>
+      <label class="tog"><input type="checkbox" id="clDup">重复文件检测（慢，会算哈希）</label>
+    </div>
+    <div class="grid g2" style="margin-top:16px">
+      <div><label class="f">大文件扫描范围（留空用默认）</label>
+        <input type="text" id="clPath" placeholder="例如 D:\ 或 /var"></div>
+      <div><label class="f">大文件阈值（MB）</label><input type="number" id="clMinMB" value="200"></div>
+    </div>
+    <div style="margin-top:16px;display:flex;gap:9px;flex-wrap:wrap">
+      <button class="btn primary" id="btnScan" onclick="cleanScan()">开始扫描</button>
+      <button class="btn" onclick="loadQuarantine()">查看隔离区</button>
+    </div>
+    <div class="log" id="clLog" style="margin-top:16px">等待操作…</div>
+  </div>
+
+  <div id="clResult" class="hidden">
+    <div class="card">
+      <h3><span class="sec-num">2</span>磁盘使用</h3>
+      <div id="clDisks" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card">
+      <h3><span class="sec-num">3</span>可回收清单<span class="tagline" id="clTotal"></span></h3>
+      <div class="hint">按风险分级。勾选要清理的类别后点下方的「生成清理计划」——
+        没有一键清全部，这是刻意的设计。</div>
+      <div id="clCats" style="margin-top:12px"></div>
+    </div>
+
+    <div class="card" id="clBigCard">
+      <h3>大文件与重复文件<span class="tagline">仅供参考，工具不替你决定</span></h3>
+      <div id="clBigList" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card" id="clSkippedCard"></div>
+
+    <div class="card">
+      <h3><span class="sec-num">4</span>执行清理</h3>
+      <div class="hint">默认把选中项<b>移入隔离区</b>而不是删除，随后可一键还原。
+        确认业务正常几天后再销毁隔离区 —— 那也是唯一不可逆的一步。</div>
+      <div class="grid g2" style="margin-top:14px">
+        <div><label class="f">隔离区位置（留空 = 同盘，还原最快）</label>
+          <input type="text" id="clTo" placeholder="同盘默认"></div>
+        <div><label class="f">清理方式</label>
+          <select id="clMode">
+            <option value="quarantine">移入隔离区（推荐，可还原）</option>
+            <option value="purge">直接删除（不可逆）</option>
+          </select></div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:9px;flex-wrap:wrap;align-items:center">
+        <button class="btn" onclick="cleanPlan()">生成清理计划（不执行）</button>
+        <button class="btn danger" onclick="cleanRun()">执行清理</button>
+      </div>
+      <label class="tog" style="margin-top:12px">
+        <input type="checkbox" id="clConfirm"> 我已逐条看过上面的清单，确认这些内容可以清理
+      </label>
+      <label class="tog" style="margin-top:8px">
+        <input type="checkbox" id="clCaution"> 我确认其中「谨慎」级条目也可以处理
+      </label>
+      <div class="log" id="clRunLog" style="margin-top:14px">等待操作…</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>隔离区<span class="tagline">删错了要能回来</span></h3>
+    <div id="clQuarantine" style="margin-top:8px"><div class="empty">点上方「查看隔离区」</div></div>
+    <div style="margin-top:14px;display:flex;gap:9px;flex-wrap:wrap">
+      <button class="btn" onclick="loadQuarantine()">刷新</button>
+      <button class="btn danger" onclick="purgeQuarantine()">销毁全部隔离内容</button>
+    </div>
+    <div class="log" id="clQLog" style="margin-top:14px">等待操作…</div>
+  </div>
+</section>
+
+<!-- ==================== 上网提速 ==================== -->
+<section id="tab-net" class="hidden">
+
+  <div class="card">
+    <h3><span class="sec-num">1</span>网络诊断</h3>
+    <div class="hint">只读取配置并实测链路质量，不修改任何设置。诊断约需 1 分钟。</div>
+    <div class="note info" style="margin-top:12px">
+      说明：<b>软件不可能让网速超过运营商给的带宽</b>。这里做的是消除本机侧的限制 ——
+      网卡协商速率、DNS 解析、丢包重传、TCP 窗口与拥塞算法、后台偷流量。
+      按「物理层 → DNS → TCP」的顺序处理，跳过物理层调参数没有意义。
+    </div>
+    <div class="grid g2" style="margin-top:16px">
+      <div><label class="f">目标</label>
+        <select id="ntTargetMode">
+          <option value="local">本机</option>
+          <option value="ssh">远程 Linux / UNIX</option>
+        </select></div>
+      <div id="ntSshWrap" class="hidden"><label class="f">远程目标</label>
+        <input type="text" id="ntTarget" placeholder="root@192.168.1.10"></div>
+    </div>
+    <div style="margin-top:16px;display:flex;gap:9px;flex-wrap:wrap">
+      <button class="btn primary" id="btnNet" onclick="netDiag()">开始诊断</button>
+      <button class="btn" onclick="netTune()">生成调优脚本（不执行）</button>
+    </div>
+    <div class="log" id="ntLog" style="margin-top:16px">等待操作…</div>
+  </div>
+
+  <div id="ntResult" class="hidden">
+    <div class="card">
+      <h3><span class="sec-num">2</span>诊断结论<span class="tagline" id="ntCounts"></span></h3>
+      <div id="ntFindings" style="margin-top:10px"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 木马查杀 ==================== -->
+<section id="tab-hunt" class="hidden">
+  <div class="card">
+    <h3>木马 / 病毒深度查杀</h3>
+    <div class="hint">全流程只读：不结束进程、不删文件、不改配置。处置动作一律先生成脚本，审阅后手动执行。</div>
+    <div class="note info" style="margin-top:12px">
+      查什么：<b>挖矿</b>（持续高 CPU 进程 · 矿池通信 · DNS 缓存痕迹）、<b>Webshell</b>
+      （PHP/JSP/ASP/ASPX 特征评分）、<b>勒索</b>（勒索信 · 批量加密扩展名）、
+      <b>隐藏持久化</b>（WMI 事件订阅 · 粘滞键后门 · BITS 任务）。
+      判定走证据链，单项证据不足只提示不定罪。
+    </div>
+    <div class="grid g2" style="margin-top:16px">
+      <div><label class="f">Web 根目录（可选，多个用逗号分隔）</label>
+        <input type="text" id="htWebRoots" placeholder="留空自动探测；如 C:////inetpub////wwwroot, D:////tomcat////webapps"></div>
+      <div><label class="f">单类扫描时间预算（秒）</label>
+        <input type="number" id="htBudget" value="30" min="5" max="300"></div>
+    </div>
+    <div style="margin-top:16px;display:flex;gap:9px;flex-wrap:wrap">
+      <button class="btn primary" id="btnHunt" onclick="huntScan()">开始深度查杀</button>
+      <button class="btn" onclick="huntForensics()">一键应急取证包</button>
+    </div>
+    <div class="log" id="htLog" style="margin-top:16px">等待操作…</div>
+  </div>
+
+  <div id="htResult" class="hidden">
+    <div class="card">
+      <h3>查杀结论<span class="tagline" id="htCounts"></span></h3>
+      <div id="htFindings" style="margin-top:10px"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 加固 ==================== -->
+<section id="tab-harden" class="hidden">
+  <div class="card">
+    <h3>安全加固</h3>
+    <div class="hint">流程是「生成脚本 → 你审阅 → 再执行」。执行前自动做配置快照，并同时生成回滚脚本。
+      默认状态下不会改动任何东西。</div>
+    <div class="grid g3">
+      <div><label class="f">加固画像</label>
+        <select id="hdProfile">
+          <option value="baseline">基础安全加固</option>
+          <option value="webserver">Web 服务器（IIS / Tomcat / Nginx）</option>
+          <option value="db">数据库主机</option>
+          <option value="perf">性能基线优化</option>
+        </select></div>
+      <div><label class="f">目标平台</label>
+        <select id="hdPlatform"><option value="auto">自动识别</option>
+          <option value="win">Windows</option><option value="nix">Linux / UNIX</option></select></div>
+      <div><label class="f">远程目标（仅 Linux，可留空）</label>
+        <input type="text" id="hdTarget" placeholder="root@192.168.1.10:22"></div>
+    </div>
+    <div style="margin-top:16px;display:flex;gap:9px;flex-wrap:wrap">
+      <button class="btn primary" onclick="hardenPlan()">生成加固方案（不执行）</button>
+      <button class="btn" onclick="exportFile('harden')">导出正向脚本</button>
+      <button class="btn" onclick="exportFile('backup')">导出回滚脚本</button>
+    </div>
+    <div class="log" id="hdLog" style="margin-top:16px">等待操作…</div>
+  </div>
+
+  <div id="hardenApplyCard" class="card hidden">
+    <h3>确认执行</h3>
+    <div class="warnbox" style="margin-top:10px">
+      <b>这会真实修改系统配置。</b><br>
+      执行前会自动生成配置快照并保留回滚脚本。但请注意：<b>改错可能导致服务中断，
+      甚至无法远程登录</b>（远程桌面 / SSH 相关项尤其如此）。<br>
+      建议先在一台测试机跑通，执行后立刻验证服务可用性。
+    </div>
+    <label class="tog" style="margin-top:14px">
+      <input type="checkbox" id="hdConfirm"> 我已阅读上面的动作清单与风险提示，确认执行
+    </label>
+    <div style="margin-top:14px"><button class="btn danger" onclick="hardenApply()">执行加固</button></div>
+  </div>
+</section>
+
+<!-- ==================== 错误日志 ==================== -->
+<section id="tab-errors" class="hidden">
+  <div class="card">
+    <h3><span class="sec-num">!</span>出错记录（原因 · 处理 · 堆栈位置）</h3>
+    <div class="hint">
+      这里记的是本工具**使用过程中**发生的错误：每一项都写清了「发生了什么、可能的原因、
+      怎么处理、影响范围」。工具不会因为出错而崩溃 —— 出错时会安全停下并在这里留痕。
+      完整堆栈在 <span class="mono" id="errDir">…</span> 下的 errors-*.jsonl 里，可直接打开查看。
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn ghost" onclick="loadErrors()">刷新列表</button>
+      <button class="btn ghost" onclick="loadErrors(true)">读取跨天记录</button>
+      <button class="btn ghost" onclick="clearErrors()">清空日志</button>
+    </div>
+    <div class="log" id="errLog" style="margin-top:16px">点击「刷新列表」查看……</div>
+  </div>
+</section>
+
+<div class="foot">
+  诺盾网络 · 服务器安全维护、杀木马病毒 skill · 作者：泰安诺盾 仇苏毅<br>
+  所有判定均在本机完成，不向外部回传任何信息<br>
+  报告中的每条结论都是线索，请结合业务复核后再变更；变更前务必备份并保留回滚脚本。
+</div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="errbar hidden" id="errbar"><div class="in"></div></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+let ENV = {}, jobId = null, lastResult = null, lastHtml = '', lastBackup = null, lastHarden = null;
+const SEVC = {CRITICAL:'#c0392b',HIGH:'#dc5b3e',MEDIUM:'#c98a06',LOW:'#3b7dd8',INFO:'#8b95a1'};
+const SEVL = {CRITICAL:'严重',HIGH:'高危',MEDIUM:'中危',LOW:'低危',INFO:'提示'};
+const CATL = {perf:'性能',sec:'安全',malware:'恶意代码',log:'日志',crash:'稳定性',
+              backup:'备份',config:'配置'};
+
+function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('on');
+  clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('on'),2600); }
+
+/* 接口返回出错时的统一展示：错误 + 原因 + 处理 + 影响，停在页面上等你看完 */
+function showApiError(r){
+  r = r || {};
+  toast(r.error || '操作没有完成');
+  const el = $('#errbar');
+  if(!el) return;
+  el.querySelector('.in').innerHTML =
+      `<b>操作没有完成：${esc(r.error||'未知错误')}</b>`
+    + (r.cause ? `<div class="e2">原因：${esc(r.cause)}</div>` : '')
+    + (r.hint ? `<div class="e2">处理：${esc(r.hint)}</div>` : '')
+    + (r.impact ? `<div class="e3">影响：${esc(r.impact)}</div>` : '')
+    + (r.log ? `<div class="e3">错误日志：${esc(r.log)}</div>` : '')
+    + '<button class="btn ghost" style="padding:3px 12px;margin-top:8px" '
+    + `onclick="document.getElementById('errbar').classList.add('hidden')">知道了</button>`;
+  el.classList.remove('hidden');
+  try{ window.scrollTo({top:0,behavior:'smooth'}); }catch(e){}
+}
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,
+  c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function fmtB(n){ n=Number(n||0); const u=['B','KB','MB','GB','TB']; let i=0;
+  while(n>=1024&&i<u.length-1){n/=1024;i++;} return n.toFixed(1)+u[i]; }
+
+/* ---------- 环境 ---------- */
+fetch('/api/env').then(r=>r.json()).then(e=>{
+  ENV=e;
+  $('#envline').textContent = `${e.hostname} · ${e.os} · Python ${e.python}`;
+  const b=$('#adminBadge');
+  if(e.is_admin){ b.textContent='管理员权限'; b.style.color='#14603a'; b.style.borderColor='#cceada'; }
+  else { b.textContent='普通用户权限'; b.style.color='#7a5606'; b.style.borderColor='#f0e2bd'; }
+  if(!e.is_windows) $('#chipSsh').classList.add('hidden');
+  $('#bkDest').value = e.home + (e.is_windows?'\\\\ops-backups':'/ops-backups');
+  if($('#errDir')) $('#errDir').textContent = e.log_dir || '(outputs/logs)';
+}).catch(()=>{ $('#envline').textContent='无法读取环境信息'; });
+
+/* ---------- Tab 切换 ---------- */
+$$('.tabs button').forEach(b=>b.onclick=()=>{
+  $$('.tabs button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+  ['audit','clean','net','hunt','backup','harden','errors'].forEach(t=>
+    $('#tab-'+t).classList.toggle('hidden', t!==b.dataset.tab));
+  if(b.dataset.tab==='errors') loadErrors();
+});
+$$('.subtabs button').forEach(b=>b.onclick=()=>{
+  $$('.subtabs button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+  ['overview','plan','findings'].forEach(t=>
+    $('#sub-'+t).classList.toggle('hidden', t!==b.dataset.sub));
+});
+
+/* ---------- 目标选择 ---------- */
+$$('input[name=tgt]').forEach(r=>r.onchange=()=>{
+  const ssh = $('input[name=tgt]:checked').value==='ssh';
+  $('#chipLocal').classList.toggle('on',!ssh);
+  $('#chipSsh').classList.toggle('on',ssh);
+  $('#sshFields').classList.toggle('hidden',!ssh);
+  $('#sshNote').classList.toggle('hidden',!ssh);
+});
+function bindTogs(root){
+  $$((root||'')+' .tog input, '+(root||'')+' input[type=checkbox], .tog input').forEach(()=>{});
+}
+$$('.tog').forEach(t=>{
+  const i=t.querySelector('input');
+  if(!i) return;
+  i.addEventListener('change',()=>t.classList.toggle('on', i.checked));
+});
+
+/* ---------- 日志与轮询 ---------- */
+function appendLog(el, lines){
+  if(!lines || !lines.length) return;
+  el.textContent += (el.textContent.endsWith('\n')?'':'\n') + lines.join('\n');
+  el.scrollTop = el.scrollHeight;
+}
+function poll(id, el, onDone){
+  let since = 0;
+  const t = setInterval(async ()=>{
+    try{
+      const r = await fetch(`/api/job?id=${id}&since=${since}`).then(x=>x.json());
+      if(r.logs && r.logs.length){ appendLog(el, r.logs); since = r.log_total; }
+      if(el === $('#log')) $('#runState').innerHTML =
+        `<span class="spin"></span> 运行中 · 已用 ${r.elapsed}s`;
+      if(r.status==='done'||r.status==='error'){
+        clearInterval(t);
+        if(el === $('#log')) $('#runState').textContent =
+          r.status==='done' ? `完成 · 用时 ${r.elapsed}s` : '失败（未改动系统之外的东西）';
+        if(r.error) appendLog(el, ['【错误】'+r.error]);
+        const d = r.error_detail || {};
+        if(d.cause) appendLog(el, ['  【原因】'+d.cause, '  【处理】'+d.hint,
+          '  【影响】'+d.impact, '  【日志】'+d.log]);
+        onDone && onDone(r);
+      }
+    }catch(e){}
+  }, 700);
+}
+
+/* ---------- 体检 ---------- */
+async function runAudit(){
+  const tg = $('input[name=tgt]:checked').value;
+  let target = {kind:'local'};
+  if(tg==='ssh'){
+    const h=$('#host').value.trim();
+    if(!h){ toast('请填写远程主机地址'); return; }
+    target = {kind:'ssh', host:h, user:$('#user').value.trim()||'root',
+              port:parseInt($('#port').value||'22'), key:$('#key').value.trim()};
+  }
+  const picked = $$('#scopes input:checked').map(i=>i.value);
+  const scope = (picked.includes('all') || !picked.length) ? 'all' : picked[0];
+  if(picked.length>1 && !picked.includes('all')) toast('一次只能选一个专项，已按第一个执行');
+
+  $('#log').textContent='';
+  $('#btnRun').disabled=true;
+  $('#results').classList.add('hidden');
+  const r = await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({target, scope, deep:$('#deep').checked, quick:$('#quick').checked,
+      log_hours:parseInt($('#logHours').value||'48')})}).then(x=>x.json());
+  jobId = r.id;
+  poll(jobId, $('#log'), async ()=>{
+    $('#btnRun').disabled=false;
+    const res = await fetch('/api/report?id='+jobId).then(x=>x.json());
+    if(res && res.findings) render(res);
+  });
+}
+
+/* ---------- 渲染 ---------- */
+function render(res){
+  lastResult = res; lastHtml = res.html_file || '';
+  $('#results').classList.remove('hidden');
+  $$('.subtabs button')[0].click();
+
+  const s = res.score||0;
+  const col = s>=90?'#1f9d5b':s>=80?'#12897a':s>=70?'#c98a06':s>=60?'#dd6b20':'#c0392b';
+  $('#scoreVal').textContent = s;
+  $('#scoreVal').style.color = col;
+  const C = 2*Math.PI*53, arc = $('#arc');
+  arc.setAttribute('stroke-dashoffset', (C*(1-s/100)).toFixed(1));
+  arc.setAttribute('stroke', col);
+
+  const c = res.counts||{};
+  let v = '';
+  if(c.CRITICAL) v = `<div class="note danger"><b>存在严重问题，建议立即处置。</b>
+    其中 ${c.CRITICAL} 项属于入侵迹象或可直接被利用的缺陷 —— 先止损，再按 P0 清单逐条处理。</div>`;
+  else if(c.HIGH) v = `<div class="note warn"><b>发现 ${c.HIGH} 项高危问题。</b>
+    建议 24 小时内处理完 P1 清单；处理前先备份并保留回滚脚本。</div>`;
+  else if(c.MEDIUM) v = `<div class="note info">存在 ${c.MEDIUM} 项中危问题，建议本周内安排处理。</div>`;
+  else v = `<div class="note ok">未发现中危以上问题，系统状态良好。</div>`;
+  const deg = (res.results||[]).filter(r=>r.ok===false).map(r=>r.name);
+  if(deg.length) v += `<div class="note warn"><b>部分模块采集降级：</b>${deg.join('、')}。
+    这些模块的结论可能不完整，请对照报告里的「未覆盖清单」。</div>`;
+  $('#verdict').innerHTML = v;
+
+  $('#sevCards').innerHTML = ['CRITICAL','HIGH','MEDIUM','LOW','INFO'].map(k=>
+    `<div class="sev"><div class="n" style="color:${SEVC[k]}">${c[k]||0}</div>
+     <div class="l">${SEVL[k]}</div></div>`).join('');
+
+  const h = res.host||{};
+  $('#hostLine').textContent = `${h.hostname||''} · 模式 ${res.mode} · 操作者 ${h.operator||''}`
+    + ` · ${h.is_admin?'管理员':'普通用户'} · 用时 ${res.duration_s||0}s`;
+
+  const bycat={}; (res.findings||[]).forEach(f=>{
+    const k=f.category||'config'; bycat[k]=(bycat[k]||0)+1; });
+  const rows = Object.entries(bycat).sort((a,b)=>b[1]-a[1])
+    .map(([k,n])=>`<tr><td>${CATL[k]||k}</td><td style="text-align:right"><b>${n}</b></td></tr>`).join('');
+  $('#catTable').querySelector('tbody').innerHTML =
+    rows || '<tr><td colspan="2" class="empty">无</td></tr>';
+
+  renderFindings(res.findings||[]);
+  renderPlan(res.findings||[]);
+}
+
+function renderFindings(list){
+  const el = $('#findingList');
+  if(!list.length){ el.innerHTML='<div class="empty">没有命中任何检查项</div>'; return; }
+  el.innerHTML = list.map(f=>{
+    const ev = (f.evidence||[]).join('\n');
+    return `<div class="f" data-sev="${f.severity}" data-cat="${f.category}"
+        style="border-left-color:${SEVC[f.severity]||'#8b95a1'}">
+      <div class="hd">
+        <span class="tag" style="color:${SEVC[f.severity]};border-color:${SEVC[f.severity]}66">${SEVL[f.severity]}</span>
+        <span class="ti">${esc(f.title)}</span>
+        <span class="tag mono">${esc(f.id)}</span>
+        <span class="tag">${CATL[f.category]||f.category}</span>
+        ${f.auto_fixable?'<span class="tag auto">可自动修复</span>':''}
+      </div>
+      ${ev?`<div class="ev">${esc(ev)}</div>`:''}
+      ${f.impact?`<div class="blk"><b>影响</b><div class="imp">${esc(f.impact)}</div></div>`:''}
+      ${f.fix?`<div class="blk"><b>修复</b><div class="fix">${esc(f.fix)}</div></div>`:''}
+      ${f.ref?`<div style="margin-top:9px;font-size:12px;color:var(--text-3)">参考 · <span class="mono">${esc(f.ref)}</span></div>`:''}
+    </div>`;
+  }).join('');
+}
+
+function renderPlan(list){
+  const ph = [
+    ['P0','立即处置','先止损，再排查根因',
+      f=>f.severity==='CRITICAL' ||
+         ['AUDIT_LOG_CLEARED','LD_PRELOAD_HIJACK','PROC_DELETED_EXE','WMI_SUBSCRIPTION',
+          'MULTI_UID0','EMPTY_PASSWORD_ACCOUNT','USER_NO_PASSWORD',
+          'DEFENDER_THREAT_HISTORY'].includes(f.id)],
+    ['P1','24 小时内','高危配置缺陷，攻击面明显', f=>f.severity==='HIGH'],
+    ['P2','本周内','中危问题与稳定性隐患', f=>f.severity==='MEDIUM'],
+    ['P3','择机优化','低危与提示类，持续改进', f=>['LOW','INFO'].includes(f.severity)],
+  ];
+  const used = new Set(); let html='';
+  ph.forEach(([code,name,desc,fn])=>{
+    const items = list.filter(f=>!used.has(f) && fn(f));
+    items.forEach(f=>used.add(f));
+    if(!items.length) return;
+    html += `<div class="phase"><div class="ph"><span>${code}</span>
+      <span style="color:var(--text-3);font-weight:500">·</span>
+      <span>${name}</span><span class="tag">${items.length} 项</span></div>
+      <div class="pd">${desc}</div>`;
+    items.forEach(f=>{
+      html += `<div class="pitem">
+        <div class="pt">${esc(f.title)}${f.auto_fixable?'<span class="tag auto">可自动修复</span>':''}</div>
+        <div class="kv">
+          <span>证据</span><span class="mono">${esc((f.evidence||[]).join(' / ').slice(0,320))}</span>
+          <span>动作</span><span class="mono">${esc((f.fix||'-').split('\n')[0])}</span>
+          <span>类别</span><span>${CATL[f.category]||f.category}</span>
+          <span>参考</span><span class="mono">${esc(f.ref||'-')}</span>
+        </div></div>`;
+    });
+    html += '</div>';
+  });
+  $('#sub-plan').innerHTML = html ||
+    '<div class="card"><div class="empty">没有需要处置的问题</div></div>';
+}
+
+$$('#filterBar .tog').forEach(c=>c.onclick=e=>{
+  if(e.target.tagName==='INPUT') return;
+  $$('#filterBar .tog').forEach(x=>x.classList.remove('on')); c.classList.add('on');
+  const f=c.dataset.f;
+  $$('#findingList .f').forEach(it=>{
+    it.style.display = (f==='all'||it.dataset.sev===f||it.dataset.cat===f)?'':'none';
+  });
+});
+
+/* ---------- 硬盘瘦身 ---------- */
+let lastScan=null, scanData=null, lastPlan=null, qItems=[];
+const RISKL={SAFE:'安全',LIKELY:'建议',CAUTION:'谨慎'};
+const RISKC={SAFE:'#0d7a6f',LIKELY:'#b45309',CAUTION:'#b91c1c'};
+
+async function cleanScan(){
+  $('#clLog').textContent=''; $('#btnScan').disabled=true;
+  const paths=$('#clPath').value.split(/[\n,;]/).map(s=>s.trim()).filter(Boolean);
+  const r = await fetch('/api/clean/scan',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({big:$('#clBig').checked, dup:$('#clDup').checked,
+      paths:paths, min_mb:Number($('#clMinMB').value)||200})}).then(x=>x.json());
+  if(r.error){ showApiError(r); $('#btnScan').disabled=false; return; }
+  poll(r.id, $('#clLog'), async ()=>{
+    $('#btnScan').disabled=false;
+    const res = await fetch('/api/report?id='+r.id).then(x=>x.json());
+    if(res && res.categories){ lastScan=res.json_file; renderClean(res); }
+    toast('扫描完成，请复核清单后再决定清理');
+  });
+}
+
+function renderClean(res){
+  scanData=res;
+  $('#clResult').classList.remove('hidden');
+
+  $('#clDisks').innerHTML = (res.disks||[]).map(d=>{
+    const p=d.percent, col=p>=90?'#b91c1c':(p>=80?'#b45309':'#0d7a6f');
+    return `<div class="diskrow"><div class="usedisk">
+      <span class="m">${esc(d.mount)}</span>
+      <span>${fmtB(d.used)} / ${fmtB(d.total)}</span>
+      <span class="p">可用 ${fmtB(d.free)} · ${p}%</span>
+      ${p>=85?'<span class="risk CAUTION">偏紧</span>':''}
+      </div><div class="bar"><i style="width:${Math.min(100,p)}%;background:${col}"></i></div></div>`;
+  }).join('') || '<div class="empty">无数据</div>';
+
+  const cats=(res.categories||[]).filter(c=>c.count>0)
+    .sort((a,b)=>b.size-a.size);
+  $('#clTotal').textContent = '合计可回收 ' + fmtB(res.reclaimable||0);
+  $('#clCats').innerHTML = cats.map(c=>{
+    const risky = c.risk==='CAUTION';
+    const canClean = !c.suggest_only && c.size>0;
+    return `<label class="clrow ${canClean?'':'off'}" data-cat="${esc(c.category)}">
+      <input type="checkbox" class="cb" value="${esc(c.category)}"
+        data-risk="${esc(c.risk)}" ${canClean?'':'disabled'}>
+      <div class="body">
+        <div class="ttl">${esc(c.title)}
+          <span class="risk ${esc(c.risk)}">${RISKL[c.risk]||c.risk}</span>
+          <span class="tag">${c.count} 项</span>
+          <span class="sz">${fmtB(c.size)}</span>
+          ${risky?'<span class="tag">需额外确认</span>':''}
+        </div>
+        ${c.note?`<div class="nt">${esc(c.note)}</div>`:''}
+        ${c.cmd?`<div class="cmd">$ ${esc(c.cmd)}</div>`:''}
+      </div></label>`;
+  }).join('') || '<div class="empty">没有可回收的内容</div>';
+
+  $$('#clCats .clrow .cb').forEach(cb=>cb.addEventListener('change',()=>{
+    cb.closest('.clrow').classList.toggle('sel', cb.checked);
+  }));
+
+  const big=(res.big_files||[]), dup=(res.duplicates||[]);
+  if(!big.length && !dup.length){
+    $('#clBigCard').classList.add('hidden');
+  } else {
+    $('#clBigCard').classList.remove('hidden');
+    let h='';
+    if(big.length){
+      h+='<div class="blk"><b>大文件</b>'
+        + big.slice(0,30).map(b=>`<div class="mono">${fmtB(b.size)}  ${esc(b.path)}</div>`).join('')
+        + '</div>';
+    }
+    if(dup.length){
+      h+='<div class="blk"><b>疑似重复</b>'
+        + dup.slice(0,15).map(g=>`<div class="mono">${fmtB(g.size)} × ${g.count} 份，`
+          + `冗余 ${fmtB(g.wasted)}</div>`).join('') + '</div>';
+    }
+    h+='<div class="note info" style="margin-top:12px">这些项目<b>仅供你判断</b>，'
+      + '不会进入清理清单 —— 哪个是原件、哪个是备份，只有你知道。</div>';
+    $('#clBigList').innerHTML=h;
+  }
+
+  const sk=res.skipped||[];
+  if(!sk.length){ $('#clSkippedCard').classList.add('hidden'); }
+  else {
+    $('#clSkippedCard').classList.remove('hidden');
+    $('#clSkippedCard').innerHTML='<h3>未能覆盖<span class="tagline">这不是「没问题」，'
+      + '是「没看到」</span></h3><div style="margin-top:8px">'
+      + sk.slice(0,30).map(s=>`<div class="mono">· ${esc(s)}</div>`).join('')
+      + '</div>';
+  }
+}
+
+function selectedCats(){
+  return $$('#clCats .clrow .cb').filter(c=>c.checked).map(c=>c.value);
+}
+
+async function cleanPlan(){
+  const cats=selectedCats();
+  if(!cats.length){ toast('请先勾选要清理的类别'); return; }
+  if(!lastScan){ toast('请先扫描'); return; }
+  $('#clRunLog').textContent='';
+  const r = await fetch('/api/clean/plan',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({scan:lastScan, categories:cats})}).then(x=>x.json());
+  if(r.error){ showApiError(r); return; }
+  poll(r.id, $('#clRunLog'), async ()=>{
+    const res = await fetch('/api/report?id='+r.id).then(x=>x.json());
+    lastPlan = res;
+    if(res && res.units){
+      const lines = res.units.slice(0,60).map(u=>
+        `    ${fmtB(u.size).padStart(10)}  ${u.path}`);
+      if(res.units.length>60) lines.push(`    ... 其余 ${res.units.length-60} 项`);
+      appendLog($('#clRunLog'), ['', '  将处理以下内容：', ...lines]);
+    }
+    toast('计划已生成，确认后点「执行清理」');
+  });
+}
+
+async function cleanRun(){
+  const cats=selectedCats();
+  if(!cats.length){ toast('请先勾选要清理的类别'); return; }
+  if(!$('#clConfirm').checked){ toast('请先勾选确认'); return; }
+  const purge = $('#clMode').value==='purge';
+  const risky = $$('#clCats .clrow .cb').filter(c=>c.checked && c.dataset.risk==='CAUTION');
+  if(risky.length && !$('#clCaution').checked){
+    toast('选中项含「谨慎」级类别，请勾选对应确认'); return;
+  }
+  if(purge && !confirm('直接删除不可逆，且不会进隔离区。确定继续？')) return;
+  $('#clRunLog').textContent='';
+  if(!lastScan){ toast('请先扫描'); return; }
+  const r = await fetch('/api/clean/apply',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({scan:lastScan, categories:cats, purge:purge,
+      allow_caution:$('#clCaution').checked, to:$('#clTo').value.trim()||null,
+      confirm:'I-UNDERSTAND-CLEAN'})}).then(x=>x.json());
+  if(r.error){ showApiError(r); appendLog($('#clRunLog'),[r.error]); return; }
+  poll(r.id, $('#clRunLog'), ()=>{ loadQuarantine(); toast('清理任务结束'); });
+}
+
+async function loadQuarantine(){
+  const r = await fetch('/api/clean/quarantine').then(x=>x.json());
+  const el=$('#clQuarantine');
+  qItems = (r.items||[]);
+  if(!qItems.length){ el.innerHTML='<div class="empty">隔离区为空</div>'; return; }
+  el.innerHTML='<table><thead><tr><th>批次</th><th>时间</th><th>项数</th>'
+    + '<th>大小</th><th>位置</th><th></th></tr></thead><tbody>'
+    + qItems.map((i,n)=>`<tr><td class="mono">${esc(i.batch)}</td>
+       <td>${esc(i.created)}</td>
+       <td>${i.count}</td><td>${fmtB(i.size)}</td>
+       <td class="mono">${esc(i.dir)}</td>
+       <td><button class="btn quiet" onclick="restoreBatchIdx(${n})">还原这一批</button></td>
+       </tr>`).join('') + '</tbody></table>';
+}
+
+async function restoreBatchIdx(n){
+  const it = qItems[n];
+  if(!it) return;
+  await restoreBatch(it.dir);
+}
+
+async function restoreBatch(dir){
+  const r = await fetch('/api/clean/restore',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({batch:dir})}).then(x=>x.json());
+  if(r.error){ showApiError(r); return; }
+  appendLog($('#clQLog'), ['已还原 '+r.restored+' 项']);
+  if(r.failed&&r.failed.length) appendLog($('#clQLog'),
+    r.failed.slice(0,10).map(f=>'未还原：'+f.path+' —— '+f.reason));
+  loadQuarantine(); toast('已还原 '+r.restored+' 项');
+}
+
+async function purgeQuarantine(){
+  if(!confirm('销毁隔离区内容后无法还原。确认所有业务已恢复正常？')) return;
+  const r = await fetch('/api/clean/purge',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({confirm:'I-UNDERSTAND-CLEAN'})}).then(x=>x.json());
+  if(r.error){ showApiError(r); return; }
+  appendLog($('#clQLog'), ['已销毁 '+r.purged+' 个批次，回收 '+fmtB(r.freed)]);
+  loadQuarantine(); toast('隔离区已清空');
+}
+
+/* ---------- 上网提速 ---------- */
+const NLEVL={BAD:'严重',WARN:'注意',INFO:'提示',GOOD:'正常'};
+$('#ntTargetMode').addEventListener('change',()=>{
+  $('#ntSshWrap').classList.toggle('hidden', $('#ntTargetMode').value!=='ssh');
+});
+
+async function netDiag(){
+  $('#ntLog').textContent=''; $('#btnNet').disabled=true;
+  const isSsh = $('#ntTargetMode').value==='ssh';
+  const r = await fetch('/api/net/diag',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({target: isSsh ? ($('#ntTarget').value.trim()||null) : null})})
+    .then(x=>x.json());
+  if(r.error){ showApiError(r); $('#btnNet').disabled=false; return; }
+  poll(r.id, $('#ntLog'), async ()=>{
+    $('#btnNet').disabled=false;
+    const res = await fetch('/api/report?id='+r.id).then(x=>x.json());
+    if(res && res.findings) renderNet(res);
+    toast('诊断完成');
+  });
+}
+
+function renderNet(res){
+  $('#ntResult').classList.remove('hidden');
+  const fs=res.findings||[];
+  const c={BAD:0,WARN:0,INFO:0,GOOD:0};
+  fs.forEach(f=>{ if(c[f.level]!==undefined) c[f.level]++; });
+  $('#ntCounts').textContent = `严重 ${c.BAD} · 注意 ${c.WARN} · 提示 ${c.INFO} · 正常 ${c.GOOD}`;
+
+  const order={BAD:0,WARN:1,INFO:2,GOOD:3};
+  const col={BAD:'#b91c1c',WARN:'#b45309',INFO:'#64748b',GOOD:'#0d7a6f'};
+  $('#ntFindings').innerHTML = fs.slice().sort((a,b)=>(order[a.level]||9)-(order[b.level]||9))
+    .map(f=>`<div class="f" style="border-left-color:${col[f.level]||'#d5dbe0'}">
+      <div class="hd"><span class="ti">${esc(f.title)}</span>
+        <span class="tag">${NLEVL[f.level]||f.level}</span>
+        <span class="tag mono">${esc(f.id)}</span></div>
+      ${(f.evidence||[]).length?`<div class="ev">${esc((f.evidence||[]).join('\n'))}</div>`:''}
+      ${f.impact?`<div class="blk"><b>影响</b><div class="imp">${esc(f.impact)}</div></div>`:''}
+      ${f.fix?`<div class="blk"><b>做法</b><div class="fix">${esc(f.fix)}</div></div>`:''}
+    </div>`).join('') || '<div class="empty">未命中任何检查项</div>';
+
+  if(res.error) appendLog($('#ntLog'), ['', '【采集提示】'+res.error,
+    '—— 结论覆盖度受限，缺失项不等于「正常」。']);
+}
+
+async function netTune(){
+  $('#ntLog').textContent='';
+  const r = await fetch('/api/net/tune',{method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({})})
+    .then(x=>x.json());
+  if(r.error){ showApiError(r); return; }
+  poll(r.id, $('#ntLog'), async ()=>{
+    const res = await fetch('/api/report?id='+r.id).then(x=>x.json());
+    if(res && res.apply_script){
+      appendLog($('#ntLog'), ['',
+        '已生成调优脚本（未执行）：',
+        '  正向：'+res.apply_script,
+        '  回滚：'+res.rollback_script,
+        '请在命令行审阅后执行： cli.py net tune --apply --yes']);
+    }
+    toast('调优脚本已生成');
+  });
+}
+
+/* ---------- 木马查杀 ---------- */
+
+async function huntScan(){
+  $('#htLog').textContent=''; $('#btnHunt').disabled=true;
+  const roots = ($('#htWebRoots').value||'').split(',').map(x=>x.trim()).filter(Boolean);
+  const body = {web_roots: roots.length?roots:null,
+                budget: parseInt($('#htBudget').value)||30};
+  const r = await fetch('/api/hunt/scan',{method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})
+    .then(x=>x.json());
+  if(r.error){ showApiError(r); $('#btnHunt').disabled=false; return; }
+  poll(r.id, $('#htLog'), async ()=>{
+    $('#btnHunt').disabled=false;
+    const res = await fetch('/api/report?id='+r.id).then(x=>x.json());
+    if(res && res.findings) renderHunt(res);
+    toast('查杀完成');
+  });
+}
+
+async function huntForensics(){
+  $('#htLog').textContent='';
+  const r = await fetch('/api/hunt/forensics',{method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({})})
+    .then(x=>x.json());
+  if(r.error){ showApiError(r); return; }
+  poll(r.id, $('#htLog'), async ()=>{
+    const res = await fetch('/api/report?id='+r.id).then(x=>x.json());
+    if(res && res.forensics_zip){
+      appendLog($('#htLog'), ['取证包已生成（只读采集，未改动系统）：',
+        '  '+res.forensics_zip,
+        '  校验：'+res.sha256_file,
+        '请把 zip 与 .sha256 一起复制到异机保存。']);
+    }
+    toast('取证包已生成');
+  });
+}
+
+function renderHunt(res){
+  $('#htResult').classList.remove('hidden');
+  const fs=res.findings||[];
+  const c={CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0,INFO:0};
+  fs.forEach(f=>{ if(c[f.level]!==undefined) c[f.level]++; });
+  $('#htCounts').textContent =
+    `严重 ${c.CRITICAL} · 高危 ${c.HIGH} · 中危 ${c.MEDIUM} · 低危 ${c.LOW} · 提示 ${c.INFO}`;
+
+  const order={CRITICAL:0,HIGH:1,MEDIUM:2,LOW:3,INFO:4};
+  $('#htFindings').innerHTML = fs.slice().sort((a,b)=>(order[a.level]||9)-(order[b.level]||9))
+    .map(f=>`<div class="f" style="border-left-color:${SEVC[f.level]||'#d5dbe0'}">
+      <div class="hd"><span class="ti">${esc(f.title)}</span>
+        <span class="tag" style="color:${SEVC[f.level]}">${SEVL[f.level]||f.level}</span>
+        <span class="tag mono">${esc(f.id)}</span></div>
+      ${(f.evidence||[]).length?`<div class="ev">${esc((f.evidence||[]).join('\n'))}</div>`:''}
+      ${f.impact?`<div class="blk"><b>影响</b><div class="imp">${esc(f.impact)}</div></div>`:''}
+      ${f.fix?`<div class="blk"><b>处置</b><div class="fix">${esc(f.fix)}</div></div>`:''}
+    </div>`).join('')
+    || '<div class="empty">✓ 未命中任何可疑项。注意：未发现 ≠ 绝对干净，高危环境建议再跑一次取证包留底。</div>';
+}
+
+/* ---------- 导出 ---------- */
+function exportFile(kind){
+  if(!jobId){ toast('请先跑一次体检或生成方案'); return; }
+  window.open(`/api/export?id=${jobId}&kind=${kind}`,'_blank');
+}
+function copySummary(){
+  if(!lastResult){ toast('请先跑一次体检'); return; }
+  const r=lastResult, c=r.counts||{};
+  const top=(r.findings||[]).slice(0,12).map(f=>`- [${SEVL[f.severity]}] ${f.title}（${f.id}）`).join('\n');
+  navigator.clipboard.writeText(
+    `【服务器体检摘要】\n主机：${r.host?.hostname}\n模式：${r.mode}\n`
+    + `健康分：${r.score}/100（${r.grade}）\n`
+    + `严重 ${c.CRITICAL||0} / 高危 ${c.HIGH||0} / 中危 ${c.MEDIUM||0} / 低危 ${c.LOW||0}\n\n`
+    + `主要问题：\n${top}\n\n（完整报告：${lastHtml}）`
+  ).then(()=>toast('摘要已复制'),()=>toast('复制失败，请手动选择'));
+}
+
+/* ---------- 备份 ---------- */
+async function runBackup(){
+  const srcs=$('#bkSources').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  $('#bkLog').textContent='';
+  const r = await fetch('/api/backup',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({dest:$('#bkDest').value.trim(),
+      label:$('#bkLabel').value.trim()||'manual', sources:srcs, keep:14})}).then(x=>x.json());
+  lastBackup = r.id;
+  poll(r.id, $('#bkLog'), ()=>{ loadBackups(); toast('备份任务结束'); });
+}
+async function genSchedule(){
+  const r = await fetch('/api/backup/schedule',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({dest:$('#bkDest').value.trim()})}).then(x=>x.json());
+  if(r.error){ showApiError(r); return; }
+  appendLog($('#bkLog'), ['已生成定时备份脚本：'+r.script]);
+  toast('定时脚本已生成，按脚本头部注释挂载即可');
+}
+async function loadBackups(){
+  const dest=$('#bkDest').value.trim();
+  const r = await fetch('/api/backups?dest='+encodeURIComponent(dest)).then(x=>x.json());
+  const el=$('#bkList');
+  if(!r.items||!r.items.length){ el.innerHTML='<div class="empty">该目录下还没有备份</div>'; return; }
+  el.innerHTML = '<table><thead><tr><th>时间</th><th>标签</th><th>文件数</th>'
+    + '<th>大小</th><th>归档</th></tr></thead><tbody>'
+    + r.items.map(i=>`<tr><td>${esc(i.created)}</td><td>${esc(i.label)}</td>
+       <td>${i.files||0}</td><td>${fmtB(i.size)}</td>
+       <td class="mono">${esc(i.archive||'-')}</td></tr>`).join('') + '</tbody></table>';
+}
+
+/* ---------- 加固 ---------- */
+async function hardenPlan(){
+  $('#hdLog').textContent='';
+  const r = await fetch('/api/harden/plan',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({profile:$('#hdProfile').value,
+      platform:$('#hdPlatform').value})}).then(x=>x.json());
+  poll(r.id, $('#hdLog'), async ()=>{
+    lastHarden = r.id;
+    $('#hardenApplyCard').classList.remove('hidden');
+    toast('方案已生成，请审阅脚本后再考虑执行');
+  });
+}
+async function hardenApply(){
+  if(!$('#hdConfirm').checked){ toast('请先勾选确认'); return; }
+  $('#hdLog').textContent='';
+  const r = await fetch('/api/harden/apply',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({profile:$('#hdProfile').value, platform:$('#hdPlatform').value,
+      target:$('#hdTarget').value.trim()||null, confirm:'I-UNDERSTAND'})}).then(x=>x.json());
+  if(r.error){ showApiError(r); return; }
+  poll(r.id, $('#hdLog'), ()=>{ toast('执行结束，请核对验证输出'); });
+}
+
+/* ---------- 错误日志 ---------- */
+async function loadErrors(allDays){
+  const el = $('#errLog');
+  el.textContent = '读取中…';
+  try{
+    const r = await fetch('/api/errors?last=20'+(allDays?'&all=1':'')).then(x=>x.json());
+    if(r.error){ el.textContent = '读取失败：'+r.error+(r.hint?('\n处理：'+r.hint):''); return; }
+    if(!r.items || !r.items.length){
+      el.textContent = '最近没有出错记录。这是好事 —— 说明各项操作都按预期完成了。\n'
+        + '（工具一旦出错，会把「原因 + 处理建议 + 完整堆栈」写到这里。）';
+      return;
+    }
+    const lines = [];
+    r.items.forEach(it=>{
+      lines.push(`● ${it.ts||''}  [${it.context||''}]`);
+      lines.push(`   ${it.type||''}: ${it.message||''}`);
+      lines.push(`   原因（${it.certain===false?'推测':'确定'}）：${it.cause||''}`);
+      lines.push(`   处理：${it.hint||''}`);
+      lines.push(`   影响：${it.impact||''}`);
+      lines.push(`   堆栈：${it.log||''}`);
+      lines.push('');
+    });
+    lines.push('提示：--debug 重跑该命令可直接在终端打印完整堆栈；'
+      + '命令行 `cli.py errors --last 30` 也能看。');
+    el.textContent = lines.join('\n');
+  }catch(e){
+    el.textContent = '读取错误日志失败：'+e
+      + '\n（这不影响其他功能。可直接打开 outputs/logs/errors-*.jsonl 查看。）';
+  }
+}
+async function clearErrors(){
+  if(!confirm('确定清空错误日志？\n（清空后历史报错原因将无法回看，体检与备份数据不受影响。）')) return;
+  try{
+    const r = await fetch('/api/errors/clear',{method:'POST'}).then(x=>x.json());
+    toast(r.removed!=null ? `已清空 ${r.removed} 个日志文件` : (r.error||'已清空'));
+    loadErrors();
+  }catch(e){ toast('清空失败：'+e); }
+}
+
+/* ---------- 关闭 ---------- */
+function shutdown(){
+  fetch('/api/shutdown',{method:'POST'}).then(()=>{
+    document.body.innerHTML =
+      '<div style="max-width:460px;margin:130px auto;text-align:center;font-family:sans-serif">'
+      + '<h2 style="font-weight:600">控制台已关闭</h2>'
+      + '<p style="color:#8b95a1">后台任务已随服务一起退出。</p></div>';
+  });
+}
+</script>
+</body>
+</html>

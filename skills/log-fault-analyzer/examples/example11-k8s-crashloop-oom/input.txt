@@ -1,0 +1,40 @@
+2026-08-30T22:00:01.001Z INFO order-service-7d8f9c6b5d-x2k4p order-service Starting order-service v3.2.0
+2026-08-30T22:00:01.234Z INFO order-service-7d8f9c6b5d-x2k4p order-service Connecting to PostgreSQL at 10.0.3.50:5432/orders
+2026-08-30T22:00:06.500Z ERROR order-service-7d8f9c6b5d-x2k4p order-service Failed to connect to database
+org.springframework.jdbc.CannotGetJdbcConnectionException: Failed to obtain JDBC Connection; nested exception is java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 30000ms.
+	at org.springframework.jdbc.datasource.DataSourceUtils.getConnection(DataSourceUtils.java:82)
+	at org.springframework.jdbc.core.JdbcTemplate.execute(JdbcTemplate.java:371)
+	at com.example.order.repository.OrderRepository.count(OrderRepository.java:23)
+	at com.example.order.service.OrderService.init(OrderService.java:45)
+	at com.example.order.OrderApplication.main(OrderApplication.java:28)
+Caused by: java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 30000ms.
+	at com.zaxxer.hikari.pool.HikariPool.createTimeoutException(HikariPool.java:694)
+	at com.zaxxer.hikari.pool.HikariPool.getConnection(HikariPool.java:197)
+	at com.zaxxer.hikari.pool.HikariPool.getConnection(HikariPool.java:162)
+	at com.zaxxer.hikari.HikariDataSource.getConnection(HikariDataSource.java:128)
+	at org.springframework.jdbc.datasource.DataSourceUtils.fetchConnection(DataSourceUtils.java:158)
+	... 12 more
+
+2026-08-30T22:00:06.600Z ERROR order-service-7d8f9c6b5d-x2k4p order-service Application startup failed
+org.springframework.beans.factory.BeanCreationException: Error creating bean with name 'orderService': Invocation of init method failed; nested exception is org.springframework.jdbc.CannotGetJdbcConnectionException
+	at org.springframework.beans.factory.annotation.InitDestroyAnnotationBeanPostProcessor.postProcessBeforeInitialization(InitDestroyAnnotationBeanPostProcessor.java:137)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.applyBeanPostProcessorsBeforeInitialization(AbstractAutowireCapableBeanFactory.java:415)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.initializeBean(AbstractAutowireCapableBeanFactory.java:1786)
+	... 15 more
+Caused by: org.springframework.jdbc.CannotGetJdbcConnectionException: Failed to obtain JDBC Connection
+	... 20 more
+
+2026-08-30T22:00:07.000Z INFO order-service-7d8f9c6b5d-x2k4p order-service JVM running for 6.234 seconds, exiting with code 1
+
+--- K8s Events ---
+2026-08-30T22:00:10Z Warning  Failed     pod/order-service-7d8f9c6b5d-x2k4p  Container order-service failed liveness probe, will be restarted
+2026-08-30T22:00:15Z Warning  BackOff    pod/order-service-7d8f9c6b5d-x2k4p  Back-off restarting failed container order-service in pod order-service-7d8f9c6b5d-x2k4p_default
+2026-08-30T22:00:20Z Warning  Unhealthy  pod/order-service-7d8f9c6b5d-x2k4p  Liveness probe failed: Get "http://10.244.1.23:8080/actuator/health": dial tcp 10.244.1.23:8080: connect: connection refused
+2026-08-30T22:00:25Z Warning  OOMKilled  pod/order-service-7d8f9c6b5d-x2k4p  Container order-service was killed (OOMKilled): memory limit exceeded
+2026-08-30T22:00:30Z Normal   Pulling    pod/order-service-7d8f9c6b5d-x2k4p  Pulling image "registry.example.com/order-service:v3.2.0"
+2026-08-30T22:00:35Z Normal   Pulled     pod/order-service-7d8f9c6b5d-x2k4p  Successfully pulled image "registry.example.com/order-service:v3.2.0"
+2026-08-30T22:00:40Z Warning  BackOff    pod/order-service-7d8f9c6b5d-x2k4p  Back-off restarting failed container
+
+--- Istio Access Log ---
+[2026-08-30T22:01:00.000Z] "GET /api/v1/orders HTTP/1.1" 503 - via_upstream - "-" 0 19 0 - "-" "curl/7.68.0" "abc-istio-001" "order-service.default.svc.cluster.local:8080" "10.244.1.23:8080" - 10.244.1.1:8080 - -
+[2026-08-30T22:01:01.000Z] "GET /api/v1/orders HTTP/1.1" 503 UH no_healthy_upstream - "-" 0 19 0 - "-" "curl/7.68.0" "abc-istio-002" "order-service.default.svc.cluster.local:8080" "-" - 10.244.1.1:8080 - -

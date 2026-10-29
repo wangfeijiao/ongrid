@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{报告标题}} · 磁盘清理报告</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#ffffff; --ink:#1a1d21; --ink2:#4a5058; --ink3:#7a828c;
+    --line:#e4e7eb; --accent:#2f6fed; --ok:#0f9d58; --warn:#e8a33d; --danger:#d93f42;
+    --shadow:0 1px 3px rgba(16,24,40,.06),0 1px 2px rgba(16,24,40,.04);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 20px 64px;background:var(--bg);
+       font-family:-apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+       color:var(--ink);line-height:1.7;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto}
+
+  header{margin-bottom:28px;padding-bottom:22px;border-bottom:1px solid var(--line)}
+  h1{margin:0 0 8px;font-size:26px;letter-spacing:-.3px}
+  .sub{color:var(--ink3);font-size:14px}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin:24px 0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow)}
+  .card .k{font-size:12.5px;color:var(--ink3);margin-bottom:6px}
+  .card .v{font-size:25px;font-weight:650;letter-spacing:-.5px}
+  .card .n{font-size:12px;color:var(--ink3);margin-top:4px}
+  .up{color:var(--ok)} .down{color:var(--danger)} .neu{color:var(--accent)}
+
+  .bar{height:10px;background:#eceff3;border-radius:6px;overflow:hidden;display:flex;margin-top:10px}
+  .bar i{display:block;height:100%}
+  .legend{display:flex;gap:18px;font-size:12.5px;color:var(--ink2);margin-top:8px;flex-wrap:wrap}
+  .legend span::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;
+       margin-right:6px;vertical-align:middle}
+
+  section{background:var(--card);border:1px solid var(--line);border-radius:14px;
+          padding:22px 24px;margin:20px 0;box-shadow:var(--shadow)}
+  h2{margin:0 0 4px;font-size:17.5px;letter-spacing:-.2px}
+  .hint{color:var(--ink3);font-size:13px;margin:0 0 16px}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th{text-align:left;padding:10px 12px;background:#f8f9fb;color:var(--ink2);
+     font-weight:600;font-size:12.5px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:11px 12px;border-bottom:1px solid #f0f2f5;vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  .path{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--ink3);word-break:break-all}
+  .num{font-weight:650;white-space:nowrap}
+  .tag{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11.5px;font-weight:600;white-space:nowrap}
+  .t-del{background:#e7f5ee;color:var(--ok)}
+  .t-keep{background:#e8eefc;color:var(--accent)}
+  .t-move{background:#fdf2e3;color:#b8791b}
+  .t-cache{background:#f0eafc;color:#7038c9}
+  .t-ask{background:#fdecec;color:var(--danger)}
+
+  .note{background:#f8f9fb;border-left:3px solid var(--accent);border-radius:0 8px 8px 0;
+        padding:12px 16px;font-size:13.5px;color:var(--ink2);margin:14px 0}
+  .note.warn{border-left-color:var(--warn);background:#fdf8ef}
+  .note.danger{border-left-color:var(--danger);background:#fdf0f0}
+
+  ol,ul{padding-left:20px;margin:8px 0}
+  li{margin:5px 0;font-size:13.5px;color:var(--ink2)}
+  code{background:#f1f3f6;padding:1.5px 6px;border-radius:4px;font-size:12.5px;
+       font-family:ui-monospace,Consolas,monospace}
+
+  footer{margin-top:32px;padding-top:18px;border-top:1px solid var(--line);
+         color:var(--ink3);font-size:12.5px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>{{报告标题}}</h1>
+    <div class="sub">{{计算机名}} · {{操作系统}} · 生成于 {{生成日期}}</div>
+  </header>
+
+  <!-- ============ 概览卡片 ============ -->
+  <div class="cards">
+    <div class="card">
+      <div class="k">清理前可用</div>
+      <div class="v">{{清理前可用GB}} <span style="font-size:14px;color:var(--ink3)">GB</span></div>
+      <div class="n">占用率 {{清理前占用率}}%</div>
+    </div>
+    <div class="card">
+      <div class="k">当前可用</div>
+      <div class="v up">{{当前可用GB}} <span style="font-size:14px;color:var(--ink3)">GB</span></div>
+      <div class="n">占用率 {{当前占用率}}%</div>
+    </div>
+    <div class="card">
+      <div class="k">已回收</div>
+      <div class="v neu">+{{已回收GB}} <span style="font-size:14px;color:var(--ink3)">GB</span></div>
+      <div class="n">{{完成项数}} 项已处理</div>
+    </div>
+    <div class="card">
+      <div class="k">预期还能再释放</div>
+      <div class="v">{{待释放GB}} <span style="font-size:14px;color:var(--ink3)">GB</span></div>
+      <div class="n">{{待办项数}} 项待你操作</div>
+    </div>
+  </div>
+
+  <div class="bar">
+    <i style="width:{{已回收占比}}%;background:var(--ok)"></i>
+    <i style="width:{{待释放占比}}%;background:var(--warn)"></i>
+    <i style="width:{{可用占比}}%;background:#c8ced8"></i>
+  </div>
+  <div class="legend">
+    <span style="--c:var(--ok)"><span style="display:inline-block;width:9px;height:9px;background:var(--ok);border-radius:2px;margin-right:6px"></span>已回收 {{已回收GB}} GB</span>
+    <span><span style="display:inline-block;width:9px;height:9px;background:var(--warn);border-radius:2px;margin-right:6px"></span>待释放 {{待释放GB}} GB</span>
+    <span><span style="display:inline-block;width:9px;height:9px;background:#c8ced8;border-radius:2px;margin-right:6px"></span>剩余占用</span>
+  </div>
+
+  <!-- ============ 机器性能画像 ============ -->
+  <section>
+    <h2>机器性能画像与操作节奏</h2>
+    <p class="hint">决定了后面怎么控制节奏，避免清理过程拖垮正在使用的电脑。</p>
+    <table>
+      <thead><tr><th style="width:110px">项目</th><th>规格</th><th style="width:200px">判断</th></tr></thead>
+      <tbody>
+        <tr><td class="num">CPU</td><td>{{CPU型号}}</td><td>{{CPU判断}}</td></tr>
+        <tr><td class="num">内存</td><td>{{内存总量}} GB，已用 {{内存占用率}}%</td><td>{{内存判断}}</td></tr>
+        <tr><td class="num">硬盘</td><td>{{磁盘型号}}</td><td>{{磁盘判断}}</td></tr>
+        <tr><td class="num">执行节奏</td><td colspan="2">{{节奏策略}}</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ============ 逐项明细表（四要素披露） ============ -->
+  <section>
+    <h2>候选项目明细 · 逐项确认</h2>
+    <p class="hint">
+      每一项都回答四个问题：<b>是什么</b>（真实身份）、<b>有什么用</b>（在系统里的作用）、
+      <b>删除的风险</b>（具体到会发生什么）、<b>不删的影响</b>（占多少、会不会继续涨）。
+    </p>
+
+    <!-- 以下为一个数据行模板，按实际项数重复 -->
+    <table>
+      <thead>
+        <tr>
+          <th style="width:36px">#</th>
+          <th style="width:170px">是什么 / 路径</th>
+          <th style="width:88px">体积</th>
+          <th>有什么用</th>
+          <th>删除的风险</th>
+          <th>不删的影响</th>
+          <th style="width:96px">建议</th>
+          <th style="width:110px">你的决定</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="num">{{序号}}</td>
+          <td><b>{{名称}}</b><div class="path">{{路径}}</div></td>
+          <td class="num">{{体积}}</td>
+          <td>{{用途说明}}</td>
+          <td>{{风险分级与后果}}</td>
+          <td>{{不删影响}}</td>
+          <td><span class="tag {{建议样式}}">{{建议}}</span></td>
+          <td>{{用户决定}}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="note warn">
+      建议用「删 / 留 / 迁 / 清缓存」四类动词表达决定，含糊的表述（如"处理一下""看看"）会被视为未授权。
+    </div>
+  </section>
+
+  <!-- ============ 已执行批次 ============ -->
+  <section>
+    <h2>执行结果</h2>
+    <p class="hint">按批次串行执行，每批结束清空一次回收站，确保空间真正释放。</p>
+    <table>
+      <thead><tr><th style="width:70px">批次</th><th>项目</th><th style="width:120px">回收体积</th><th style="width:100px">状态</th><th>备注</th></tr></thead>
+      <tbody>
+        <tr><td>{{批次号}}</td><td>{{项目}}</td><td class="num">{{回收体积}}</td><td>{{状态}}</td><td>{{备注}}</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ============ 需用户自助操作 ============ -->
+  <section>
+    <h2>需要你自己操作的项目</h2>
+    <p class="hint">这些涉及 GUI 操作或管理员权限，由助手代劳风险过高，附上标准步骤。</p>
+    <div class="note danger">
+      <b>{{操作项}}</b> —— {{为什么不能代办}}<br>
+      <b>步骤：</b>
+      <ol>{{操作步骤}}</ol>
+      <b>注意：</b>{{注意事项}}
+    </div>
+  </section>
+
+  <!-- ============ 沉淀的规则 ============ -->
+  <section>
+    <h2>本轮沉淀的清理规则</h2>
+    <p class="hint">
+      记入决策规则库，下次清理同类项目按此标准自动执行，不再逐项询问。
+      <b>高敏类别（个人文档、聊天记录、财务合同、项目底稿）永不写入固定规则。</b>
+    </p>
+    <table>
+      <thead><tr><th style="width:34%">路径模式</th><th style="width:14%">分类</th><th style="width:14%">决策</th><th>依据</th></tr></thead>
+      <tbody>
+        <tr><td class="path">{{路径模式}}</td><td>{{分类}}</td><td><span class="tag {{决策样式}}">{{决策}}</span></td><td>{{依据}}</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer>
+    智能磁盘清理助手 · 全程只读扫描优先，删除只进回收站，每步可追溯
+  </footer>
+
+</div>
+</body>
+</html>

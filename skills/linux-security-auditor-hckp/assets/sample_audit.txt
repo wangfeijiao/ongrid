@@ -1,0 +1,59 @@
+# 示例：一台偏"裸奔"的测试服务器快照（用于演示审计器抓问题）
+# 在目标服务器上用如下命令采集后粘贴即可：
+#   sshd -T 2>/dev/null; echo; echo '[firewall]'; iptables -L -n; echo '[sysctl]'; sysctl -a; \
+#   echo '[users]'; getent passwd; echo '[suid]'; find / -xdev \( -perm -4000 -o -perm -2000 \) -type f -print 2>/dev/null; \
+#   echo '[services]'; systemctl list-unit-files --type=service | grep enabled; echo '[listening]'; ss -tulnp; \
+#   echo '[packages]'; dpkg -l | grep -E 'telnet|rsh|tftp|vsftpd'; echo '[cron]'; crontab -l
+
+[sshd_config]
+PermitRootLogin yes
+PasswordAuthentication yes
+Protocol 2
+MaxAuthTries 6
+PermitEmptyPasswords no
+X11Forwarding yes
+
+[firewall]
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination
+ACCEPT     all  --  anywhere             anywhere
+
+[sysctl]
+net.ipv4.conf.all.rp_filter = 0
+net.ipv4.conf.all.accept_redirects = 1
+net.ipv4.tcp_syncookies = 0
+net.ipv4.icmp_echo_ignore_broadcasts = 0
+kernel.randomize_va_space = 1
+net.ipv4.ip_forward = 1
+
+[users]
+root:x:0:0:root:/root:/bin/bash
+backdoor:x:0:0:backdoor:/home/backdoor:/bin/bash
+ftpuser:x::1001:1001::/home/ftpuser:/bin/bash
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+
+[suid]
+-rwsr-xr-x 1 root root 54232 /usr/bin/sudo
+-rwsr-xr-x 1 root root 40128 /usr/bin/passwd
+-rwsr-sr-x 1 root root 12345 /usr/local/bin/backdoor
+
+[services]
+telnetd.service                              enabled
+vsftpd.service                               enabled
+ssh.service                                  enabled
+
+[listening]
+LISTEN 0 128 0.0.0.0:22 users:(("sshd",pid=1))
+LISTEN 0 128 0.0.0.0:23 users:(("telnetd",pid=2))
+LISTEN 0 128 0.0.0.0:3306 users:(("mysqld",pid=3))
+LISTEN 0 128 127.0.0.1:631 users:(("cupsd",pid=4))
+
+[packages]
+ii  telnetd 0.17-41 amd64
+ii  rsh-server 0.17-18 amd64
+ii  vsftpd 3.0.3-12 amd64
+ii  openssh-server 8.4p1 amd64
+
+[cron]
+0 3 * * * root /tmp/cleanup.sh
+*/5 * * * * root /usr/local/bin/sync.sh

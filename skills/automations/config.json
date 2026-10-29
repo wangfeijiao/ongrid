@@ -1,0 +1,15 @@
+{
+  "name": "automations",
+  "displayName": "开发运维 一键脚本 流程自动化",
+  "encoding_fallback": [
+    "utf-8",
+    "gbk",
+    "gb18030"
+  ],
+  "features": [
+    "cli",
+    "selftest",
+    "dry-run",
+    "error-handling"
+  ]
+}

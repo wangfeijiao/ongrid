@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# ongrid cloud service image — multi-stage, distroless final.
+# ongrid cloud service image — multi-stage, Ubuntu 22.04 final.
 # Build context MUST be the repo root (see Makefile target `docker-ongrid`).
 
 ARG VERSION=dev
@@ -51,21 +51,27 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     -o /out/ongrid ./cmd/ongrid
 
 # ---------- Stage 2: runtime ----------
-# debian:bookworm-slim so the cgo binary's glibc + libstdc++ + libgomp
+# ubuntu:22.04 (jammy) so the cgo binary's glibc + libstdc++ + libgomp
 # deps resolve at runtime (alpine's musl would need a separate
-# onnxruntime musl build that doesn't ship from upstream). git is still
-# needed for knowledge-base repo sync, openssh-client for SSH-style
-# repo URLs.
-FROM debian:bookworm-slim
+# onnxruntime musl build that doesn't ship from upstream). The cgo binary
+# is built on bookworm (glibc 2.36) but only links against symbols that
+# exist in jammy's glibc 2.35 — verified by running the bookworm-built
+# binary inside a jammy container before switching the base.
+#
+# Operators also exec into this container to debug (docker exec), so a
+# usable shell + the usual Linux toolbox is installed on purpose: this
+# image is a debugging surface, not a minimal distroless artifact.
+FROM ubuntu:22.04
 
-# Knowledge-base + onnxruntime runtime deps.
+# Knowledge-base + onnxruntime runtime deps, plus the everyday Linux
+# toolbox for in-container troubleshooting.
 #   - git / openssh-client / ca-certificates / tzdata: same role as
 #     before the bookworm switch.
 #   - libgomp1: openmp runtime libonnxruntime needs.
-#   - libstdc++6 / libc6: already present in bookworm-slim but kept
-#     explicit so a future minify pass doesn't surprise us.
-#   - curl: needed by the in-image entry-shim if we ever inline the
-#     model download; lightweight, keep it.
+#   - libstdc++6 / libc6: present in the base but kept explicit so a
+#     future minify pass doesn't surprise us.
+#   - curl / wget: fetch endpoints and the in-image entry-shim if we ever
+#     inline the model download.
 #   - python3 / python3-pip: the cloud_bash sandbox runs as non-root with
 #     no package manager, so an agent can't install tooling at runtime; a
 #     huge swath of cloud CLIs (tccli, awscli, …) are Python. Ship a usable
@@ -74,17 +80,39 @@ FROM debian:bookworm-slim
 #     persistent volume (/var/lib/ongrid/tools, the cloud_bash PYTHONUSERBASE)
 #     so they survive container recreation, don't bloat the image, and can be
 #     added at runtime via the approval-gated cloud_bash (no image rebuild).
-# Retry up to 5× — deb.debian.org intermittently 502s, and a single transient
+#   - toolbox: procps/ps/top, net-tools/netstat/arp, iproute2/ip/ss,
+#     iputils-ping/ping, dnsutils/dig/nslookup, traceroute, tcpdump, lsof,
+#     vim / nano / less / tree, unzip / zip, jq, htop, sysstat, strace,
+#     sudo, bash-completion, locales — everything an operator reaches for
+#     when exec-ing into the container.
+#   - netcat-openbsd / telnet: `nc -vz host port` is the fastest way to
+#     prove an upstream is reachable without a full client.
+#   - ltrace: library-call tracing, the counterpart to strace.
+#   - cron / file / xz-utils / bzip2: scheduled tasks + archive handling.
+#     (tailf was dropped from util-linux 2.37+ and yq is not an apt
+#     package — both intentionally absent.)
+# Retry up to 5× — apt mirrors intermittently 502, and a single transient
 # failure here otherwise kills the whole image build. Acquire::Retries also
 # retries individual package downloads within one apt run.
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Asia/Shanghai \
+    LANG=C.UTF-8
 RUN set -eux; \
-    echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries; \
+    echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries; \
     for i in 1 2 3 4 5; do \
         apt-get update && apt-get install -y --no-install-recommends \
-            git openssh-client ca-certificates tzdata libgomp1 libstdc++6 curl \
-            python3 python3-pip && break; \
+            git openssh-client ca-certificates tzdata libgomp1 libstdc++6 libc6 \
+            curl wget \
+            python3 python3-pip \
+            bash bash-completion sudo locales \
+            procps net-tools iproute2 iputils-ping iputils-tracepath dnsutils \
+            traceroute tcpdump lsof htop sysstat strace \
+            vim nano less tree unzip zip jq rsync \
+            netcat-openbsd telnet ltrace cron file xz-utils bzip2 && break; \
         [ "$i" = 5 ] && exit 1; echo "apt attempt $i failed, retrying in 5s"; sleep 5; \
     done; \
+    ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime && echo ${TZ} > /etc/timezone; \
+    locale-gen en_US.UTF-8 2>/dev/null || true; \
     rm -rf /var/lib/apt/lists/*
 
 # ONNX Runtime shared library. Pin the version so a future apt-mirror
@@ -139,11 +167,17 @@ WORKDIR /
 # 8080 = HTTP API, 9100 = Prometheus /metrics (see ADR-004 §2).
 EXPOSE 8080 9100
 
-# Non-root user. debian:bookworm-slim has groupadd/useradd; pin to the
+# Non-root user. ubuntu:22.04 has groupadd/useradd; pin to the
 # same uid (65532) the old alpine layer used so file-perm semantics on
 # bind-mounted /var/lib/ongrid survive the base switch.
+# Need root inside a debug shell? `docker exec -u root` — no sudoers
+# entry is granted, so the default runtime stays least-privilege.
+# /bin/bash (not /usr/sbin/nologin) so `docker exec -it <ctr> bash` drops
+# straight into a usable shell — the container is a debugging surface and
+# operators rely on it. Least-privilege is unaffected: the process still
+# runs as uid 65532, not root.
 RUN groupadd --system --gid 65532 nonroot && \
-    useradd  --system --uid 65532 --gid 65532 --no-create-home --shell /usr/sbin/nologin nonroot && \
+    useradd  --system --uid 65532 --gid 65532 --no-create-home --shell /bin/bash nonroot && \
     chown -R nonroot:nonroot /var/lib/ongrid
 # HOME defaults to / for useradd --no-create-home; fastembed-go's
 # sugarme/tokenizer dep does $HOME/.cache/tokenizer mkdir and crashes

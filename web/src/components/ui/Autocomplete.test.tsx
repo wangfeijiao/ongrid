@@ -26,3 +26,23 @@ it('selects suggestions by keyboard and preserves custom values without submitti
   await act(async () => { await user.click(screen.getByRole('button', { name: 'Save' })); });
   expect(submit).toHaveBeenCalledWith('preview-123');
 });
+
+it('renders grouped options with headers and selects a grouped value', async () => {
+  function Form() {
+    const [value, setValue] = useState('');
+    return <Autocomplete aria-label="Branch" value={value} onValueChange={setValue} options={[
+      { value: 'main', label: 'main', group: 'Branches' },
+      { value: 'dev', label: 'dev', group: 'Branches' },
+      { value: 'v1', label: 'v1', group: 'Tags' },
+    ]} />;
+  }
+  const user = userEvent.setup();
+  render(<Form />);
+  const input = screen.getByRole('combobox', { name: 'Branch' });
+  await act(async () => { await user.click(input); });
+  expect(await screen.findByRole('option', { name: 'main' })).toBeInTheDocument();
+  expect(screen.getByText('Branches')).toBeInTheDocument();
+  expect(screen.getByText('Tags')).toBeInTheDocument();
+  await act(async () => { await user.keyboard('{ArrowDown}{Enter}'); });
+  expect(input).toHaveValue('main');
+});

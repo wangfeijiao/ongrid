@@ -1,0 +1,13 @@
+name: cicd-troubleshooter
+version: 0.1.2
+description: CI/CD 流水线排障与日志分析
+triggers:
+  - 流水线失败
+  - 构建失败
+  - 部署失败
+  - 测试失败
+  - 看日志
+  - 日志分析
+  - 镜像拉取失败
+  - 回滚
+category: 开发工具

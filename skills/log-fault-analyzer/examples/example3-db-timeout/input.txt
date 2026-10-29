@@ -1,0 +1,12 @@
+2026-08-30 16:45:01.001 INFO [product-service,jkl012] 4567 --- [http-nio-8080-exec-15] c.e.p.controller.ProductController : 收到请求, GET /api/v1/products/10086
+2026-08-30 16:45:01.002 INFO [product-service,jkl012] 4567 --- [http-nio-8080-exec-15] c.e.p.service.ProductService : 查询商品详情, productId=10086
+2026-08-30 16:45:01.003 INFO [product-service,jkl012] 4567 --- [http-nio-8080-exec-15] com.zaxxer.hikari.HikariDataSource : 获取数据库连接, pool=product-db-pool
+2026-08-30 16:45:05.500 ERROR [product-service,jkl012] 4567 --- [http-nio-8080-exec-15] c.e.p.service.ProductService : 查询商品详情失败
+org.springframework.dao.QueryTimeoutException: SQL query timed out; nested exception is org.postgresql.util.PSQLException: ERROR: canceling statement due to statement timeout
+  语句: SELECT p.*, c.name as category_name FROM product p LEFT JOIN category c ON p.category_id = c.id WHERE p.id = $1
+	at org.springframework.jdbc.support.SQLExceptionSubclassTranslator.doTranslate(SQLExceptionSubclassTranslator.java:76)
+	at org.springframework.jdbc.support.AbstractFallbackSQLExceptionTranslator.translate(AbstractFallbackSQLExceptionTranslator.java:72)
+	at org.springframework.jdbc.core.JdbcTemplate.execute(JdbcTemplate.java:620)
+	at com.example.product.service.ProductService.getProductDetail(ProductService.java:123)
+Caused by: org.postgresql.util.PSQLException: ERROR: canceling statement due to statement timeout
+2026-08-30 16:45:05.501 INFO [product-service,jkl012] 4567 --- [http-nio-8080-exec-15] c.e.p.controller.ProductController : 请求处理完成, 耗时=4500ms, 状态=500

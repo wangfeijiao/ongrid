@@ -1,0 +1,13 @@
+2026-08-30 14:23:10.100 INFO [order-service,abc123456] 8765 --- [nio-8080-exec-3] c.e.o.controller.OrderController : 收到创建订单请求, userId=10086
+2026-08-30 14:23:10.102 INFO [order-service,abc123456] 8765 --- [nio-8080-exec-3] c.e.o.service.UserService : 查询用户信息, userId=10086
+2026-08-30 14:23:10.150 WARN [order-service,abc123456] 8765 --- [nio-8080-exec-3] c.e.o.service.UserService : 用户缓存未命中, 回源RPC查询
+2026-08-30 14:23:11.234 ERROR [order-service,abc123456] 8765 --- [nio-8080-exec-3] c.e.o.service.OrderService : 创建订单失败
+java.lang.NullPointerException: Cannot invoke "com.example.order.model.User.getUserId()" because "user" is null
+	at com.example.order.service.OrderService.createOrder(OrderService.java:87)
+	at com.example.order.controller.OrderController.create(OrderController.java:45)
+	at sun.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at sun.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:62)
+	at org.springframework.web.method.support.InvocableHandlerMethod.doInvoke(InvocableHandlerMethod.java:205)
+	at org.springframework.web.servlet.mvc.method.annotation.ServletInvocableHandlerMethod.invokeAndHandle(ServletInvocableHandlerMethod.java:117)
+2026-08-30 14:23:11.235  WARN [order-service,abc123456] 8765 --- [nio-8080-exec-3] c.e.o.controller.OrderController : 订单创建接口返回500
+2026-08-30 14:23:11.236 INFO [order-service,abc123456] 8765 --- [nio-8080-exec-3] c.e.o.filter.RequestLogFilter : 请求处理完成, 耗时=1136ms, status=500

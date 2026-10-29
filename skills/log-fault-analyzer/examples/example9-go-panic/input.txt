@@ -1,0 +1,34 @@
+2026/08/30 20:30:01 [INFO] order-service starting, version=1.8.2, port=8080
+2026/08/30 20:30:01 [INFO] connected to mysql at 10.0.1.100:3306/orders
+2026/08/30 20:30:01 [INFO] connected to kafka at 10.0.1.101:9092
+2026/08/30 20:30:05 [INFO] [trace:go-panic-001] received POST /api/v1/orders, user=U20001
+2026/08/30 20:30:05 [INFO] [trace:go-panic-001] validating order request, items=3
+2026/08/30 20:30:05 [INFO] [trace:go-panic-001] checking inventory for product P1001
+panic: runtime error: invalid memory address or nil pointer dereference
+[signal SIGSEGV: segmentation violation code=0x1 addr=0x0 pc=0x8a2f3c]
+
+goroutine 34 [running]:
+github.com/order-service/service.(*OrderService).checkInventory(0xc0001a2000, 0xc00021e000, 0x3, 0x4, 0x0, 0x0)
+	/app/service/order.go:156 +0x1fc
+github.com/order-service/service.(*OrderService).CreateOrder(0xc0001a2000, 0xc00021e000, 0xc0001f6000, 0x0, 0x0)
+	/app/service/order.go:78 +0x85
+github.com/order-service/handler.(*OrderHandler).Create(0xc00019e000, 0xa98420, 0xc00020a000, 0xc0001f4000)
+	/app/handler/order.go:45 +0x1a3
+net/http.HandlerFunc.ServeHTTP(0xc00019c000, 0xa98420, 0xc00020a000, 0xc0001f4000)
+	/usr/local/go/src/net/http/server.go:2122 +0x44
+github.com/gorilla/mux.(*Router).ServeHTTP(0xc00014a000, 0xa98420, 0xc00020a000, 0xc0001f4000)
+	/go/pkg/mod/github.com/gorilla/mux@v1.8.0/mux.go:210 +0x1cf
+github.com/order-service/middleware.LoggingMiddleware.func1(0xa98420, 0xc00020a000, 0xc0001f0100)
+	/app/middleware/logging.go:34 +0x12a
+net/http.HandlerFunc.ServeHTTP(0xc000198000, 0xa98420, 0xc00020a000, 0xc0001f0100)
+	/usr/local/go/src/net/http/server.go:2122 +0x44
+net/http.serverHandler.ServeHTTP(0xc0000a6000, 0xa98420, 0xc00020a000, 0xc0001f0100)
+	/usr/local/go/src/net/http/server.go:2936 +0x246
+net/http.(*conn).serve(0xc00012c000, 0xa98c40, 0xc00014c000)
+	/usr/local/go/src/net/http/server.go:1995 +0x805
+created by net/http.(*Server).Serve
+	/usr/local/go/src/net/http/server.go:3089 +0x2a8
+
+2026/08/30 20:30:05 [ERROR] [trace:go-panic-001] request failed, status=500, duration=23ms, error="panic recovered: runtime error: invalid memory address or nil pointer dereference"
+2026/08/30 20:30:05 [WARN] [trace:go-panic-001] panic recovered in /api/v1/orders, stack trace logged above
+2026/08/30 20:30:10 [INFO] health check: ok, goroutines=45, memory=128MB

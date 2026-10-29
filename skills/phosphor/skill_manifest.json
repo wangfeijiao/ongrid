@@ -1,0 +1,7 @@
+{
+  "slug": "phosphor",
+  "generated_at": "2026-08-21T12:37:28",
+  "version": "1.0.2",
+  "displayName": "Ruby运行时追踪 性能剖析 事件采集",
+  "description": "基于DTrace的Ruby运行时事件采集与结构化输出工具，辅助性能诊断。"
+}

@@ -1,0 +1,5 @@
+2026-08-30 22:00:00.001 INFO  app-server : 服务启动完成, 端口=8080
+2026-08-30 22:00:05.123 INFO  app-server : 收到请求, POST /api/v1/submit
+2026-08-30 22:00:05.456 ERROR app-server : 处理请求失败
+2026-08-30 22:00:05.457 ERROR app-server : 系统内部错误
+2026-08-30 22:00:05.458 INFO  app-server : 请求处理完成, 耗时=335ms, 状态=500

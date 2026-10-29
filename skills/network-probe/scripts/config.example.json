@@ -1,0 +1,18 @@
+{
+  "description": "network-probe 配置示例（请按贵司实际网络修改，勿含真实口令）",
+  "subnet": "192.168.100.0/24",
+  "gateway": "192.168.100.1",
+  "dns": ["223.5.5.5", "8.8.8.8"],
+  "external_targets": ["8.8.8.8", "223.5.5.5", "1.1.1.1"],
+  "switch": {
+    "host": "192.168.100.254",
+    "community_ro": "public",
+    "community_rw": "private",
+    "version": 2
+  },
+  "rogue_detect": {
+    "clients_behind_threshold": 5,
+    "auto_cutoff": false,
+    "confirm_before_cut": true
+  }
+}

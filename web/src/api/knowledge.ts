@@ -145,6 +145,16 @@ export function listRepos() {
   return request<{ items: KnowledgeRepo[]; total: number }>('GET', '/knowledge/repos');
 }
 
+export type RepoRefs = { branches: string[]; tags: string[] };
+
+// listRepoRefs asks the manager to list a remote's branch and tag short-names
+// (via `git ls-remote --heads --tags`). Used by the repo editor dropdown.
+// Accepts an AbortSignal so a superseded URL edit can cancel an in-flight call.
+export function listRepoRefs(url: string, signal?: AbortSignal) {
+  const q = new URLSearchParams({ url }).toString();
+  return request<RepoRefs>('GET', `/knowledge/repos/refs?${q}`, undefined, { signal });
+}
+
 export function createRepo(input: { url: string; branch?: string; description?: string }) {
   return request<KnowledgeRepo>('POST', '/knowledge/repos', input);
 }

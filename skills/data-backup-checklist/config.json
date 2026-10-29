@@ -1,0 +1,15 @@
+{
+  "name": "data-backup-checklist",
+  "displayName": "备份核查 完整性校验 风险预警",
+  "encoding_fallback": [
+    "utf-8",
+    "gbk",
+    "gb18030"
+  ],
+  "features": [
+    "cli",
+    "selftest",
+    "dry-run",
+    "error-handling"
+  ]
+}

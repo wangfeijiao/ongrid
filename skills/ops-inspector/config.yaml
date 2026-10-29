@@ -1,0 +1,11 @@
+name: ops-inspector
+version: 0.1.2
+description: Linux 服务器只读健康巡检与基础排障
+triggers:
+  - 检查服务器
+  - 服务器体检
+  - 服务器排障
+  - 服务器卡
+  - 服务连不上
+  - 看下系统状态
+category: 开发工具

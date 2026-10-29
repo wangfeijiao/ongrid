@@ -11,6 +11,7 @@
 //	GET /v1/knowledge/search?q=...&limit=N keyword search across all docs
 //
 //	GET /v1/knowledge/repos list registered git repos
+//	GET /v1/knowledge/repos/refs?url=... list a remote's branches + tags
 //	POST /v1/knowledge/repos register a git repo
 //	POST /v1/knowledge/repos/{id}/sync trigger sync (clone/pull + index)
 //	DELETE /v1/knowledge/repos/{id} unregister + remove docs
@@ -54,6 +55,9 @@ type Service interface {
 	ListPaths(ctx context.Context) (map[string]int, error)
 
 	ListRepos(ctx context.Context) ([]*model.Repository, error)
+	// ListRefs lists the remote's branch and tag short-names for a repo URL.
+	// Read-only; used to populate the repo editor's branch/tag dropdown.
+	ListRefs(ctx context.Context, repoURL string) (branches, tags []string, err error)
 	CreateRepo(ctx context.Context, in biz.CreateRepoInput) (*model.Repository, error)
 	UpdateRepo(ctx context.Context, id uint64, branch, description string) (*model.Repository, error)
 	Sync(ctx context.Context, id uint64) (*model.Repository, error)
@@ -121,6 +125,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/knowledge/search", h.search)
 	r.Get("/v1/knowledge/paths", h.listPaths)
 	r.Get("/v1/knowledge/repos", h.listRepos)
+	r.Get("/v1/knowledge/repos/refs", h.listRepoRefs)
 	r.With(h.writeMW("knowledge:repo")).Post("/v1/knowledge/repos", h.createRepo)
 	r.With(h.writeMW("knowledge:repo")).Patch("/v1/knowledge/repos/{id}", h.updateRepo)
 	r.With(h.writeMW("knowledge:repo")).Post("/v1/knowledge/repos/{id}/sync", h.syncRepo)
@@ -502,6 +507,27 @@ func (h *Handler) listRepos(w http.ResponseWriter, r *http.Request) {
 		out = append(out, toRepoDTO(x))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out, "total": len(out)})
+}
+
+// listRepoRefs lists a remote's branch and tag short-names for a repo URL.
+// @Summary List a repository's branches and tags
+// @Router /v1/knowledge/repos/refs [get]
+// @Param url query string true "repository URL"
+// @Success 200 {object} map[string]any
+func (h *Handler) listRepoRefs(w http.ResponseWriter, r *http.Request) {
+	repoURL := r.URL.Query().Get("url")
+	branches, tags, err := h.svc.ListRefs(r.Context(), repoURL)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if branches == nil {
+		branches = []string{}
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"branches": branches, "tags": tags})
 }
 
 type createRepoReq struct {

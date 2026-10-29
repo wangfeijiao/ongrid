@@ -1,0 +1,15 @@
+{
+  "name": "world-of-m365",
+  "displayName": "M365运维 脚本自动化 批量处理",
+  "encoding_fallback": [
+    "utf-8",
+    "gbk",
+    "gb18030"
+  ],
+  "features": [
+    "cli",
+    "selftest",
+    "dry-run",
+    "error-handling"
+  ]
+}

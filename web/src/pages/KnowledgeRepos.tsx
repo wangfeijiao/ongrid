@@ -1,13 +1,13 @@
 import { usePermissions } from '@/store/me';
 import { EmptyStateCard } from '@/components/ui';
-import { Button, Label, Input, Textarea } from '@/components/ui';
+import { Autocomplete, Button, Label, Input, Textarea, type AutocompleteOption } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { Hint } from '@/components/ui/Tooltip';
 // KnowledgeRepos page — add / sync / remove git repos. Each
 // successfully-synced repo populates knowledge_docs (source_type=repo);
 // the LLM's query_knowledge tool then searches them alongside manual
 // docs.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ChevronLeft,
@@ -28,12 +28,14 @@ import {
   deleteSSHIdentity,
   generateSSHIdentity,
   isBuiltinVault,
+  listRepoRefs,
   listRepos,
   listSSHIdentities,
   repositoryName,
   syncRepo,
   updateRepo,
   type KnowledgeRepo,
+  type RepoRefs,
   type SSHIdentity,
 } from '@/api/knowledge';
 import { ApiError } from '@/api/client';
@@ -94,6 +96,15 @@ function gitErrorHint(raw: string, url: string, tr: (zh: string, en: string) => 
   if (low.includes('connection refused'))
     return tr('连接被拒：检查防火墙 / 出口代理。', 'Connection refused: check the firewall / egress proxy.');
   return '';
+}
+
+// Lightweight client-side pre-filter for the refs lookup. The backend
+// validateRepositoryURL is authoritative; this only avoids firing requests for
+// input that can't possibly be a git remote (empty / whitespace / local paths).
+function isPlausibleRepoURL(raw: string): boolean {
+  const s = raw.trim();
+  if (!s || s.length > 512 || /\s/.test(s)) return false;
+  return /^(https?:\/\/|ssh:\/\/|git@)/i.test(s) || /^[^:\s]+@[^:\s]+:.+/.test(s);
 }
 
 export default function KnowledgeReposPage() {
@@ -355,16 +366,80 @@ function RepoCard({
 function RepoCreator({ repo, onClose, onCreated }: { repo?: KnowledgeRepo; onClose: () => void; onCreated: () => void }) {
   const { tr } = useI18n();
   const [url, setUrl] = useState(repo?.url ?? '');
-  const [branch, setBranch] = useState(repo?.branch ?? 'main');
+  // Empty (not "main") by default: the dropdown now resolves the real refs
+  // after the URL is entered, so we must not pre-seed a guess that fails
+  // backend validation for repos whose default branch is master/trunk/etc.
+  const [branch, setBranch] = useState(repo?.branch ?? '');
   const [description, setDescription] = useState(repo?.description ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Remote refs for the branch/tag dropdown.
+  const [refs, setRefs] = useState<RepoRefs | null>(null);
+  const [refsLoading, setRefsLoading] = useState(false);
+  const [refsError, setRefsError] = useState<string | null>(null);
+  const refsAbort = useRef<AbortController | null>(null);
+
+  const fetchRefs = useCallback(async (targetUrl: string) => {
+    refsAbort.current?.abort();
+    const trimmed = targetUrl.trim();
+    if (!isPlausibleRepoURL(trimmed)) {
+      setRefs(null);
+      setRefsError(null);
+      setRefsLoading(false);
+      return;
+    }
+    setRefsLoading(true);
+    setRefsError(null);
+    const controller = new AbortController();
+    refsAbort.current = controller;
+    try {
+      const res = await listRepoRefs(trimmed, controller.signal);
+      if (controller.signal.aborted) return;
+      setRefs(res);
+    } catch (e) {
+      if (controller.signal.aborted) return;
+      setRefs(null);
+      setRefsError(e instanceof ApiError ? e.message : (e as Error).message);
+    } finally {
+      if (!controller.signal.aborted) setRefsLoading(false);
+    }
+  }, []);
+
+  // Debounce refs lookup on URL edits; in edit mode the URL is fixed so this
+  // prefetches once when the modal opens.
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void fetchRefs(url); }, 400);
+    return () => window.clearTimeout(timer);
+  }, [url, fetchRefs]);
+
+  // Cancel any in-flight refs request when the modal unmounts.
+  useEffect(() => () => refsAbort.current?.abort(), []);
+
+  const branchOptions = useMemo<AutocompleteOption[]>(() => {
+    const out: AutocompleteOption[] = [];
+    const seen = new Set<string>();
+    const push = (v: string, group: string) => {
+      if (!v || seen.has(v)) return;
+      seen.add(v);
+      out.push({ value: v, label: v, group });
+    };
+    for (const b of refs?.branches ?? []) push(b, tr('分支', 'Branches'));
+    for (const t of refs?.tags ?? []) push(t, tr('Tag', 'Tags'));
+    // Keep the current value selectable even when the remote list omits it
+    // (edit mode, deleted ref, or fetch failure).
+    const current = branch.trim();
+    if (current && !seen.has(current)) {
+      out.unshift({ value: current, label: current, group: tr('当前值', 'Current') });
+    }
+    return out;
+  }, [refs, branch, tr]);
 
   const submit = async () => {
     setSubmitting(true);
     setErr(null);
     try {
-      const input = { branch: branch.trim() || 'main', description: description.trim() };
+      const input = { branch: branch.trim(), description: description.trim() };
       if (repo) await updateRepo(repo.id, input);
       else await createRepo({ url: url.trim(), ...input });
       onCreated();
@@ -393,7 +468,7 @@ function RepoCreator({ repo, onClose, onCreated }: { repo?: KnowledgeRepo; onClo
           <Button variant="primary" size="sm"
             type="button"
             onClick={() => void submit()}
-            disabled={submitting || url.trim() === ''}
+            disabled={submitting || url.trim() === '' || branch.trim() === ''}
             className="px-3 py-1.5 font-medium text-accent-fg"
           >
             {submitting ? tr('验证并保存中…', 'Verifying and saving…') : tr('验证并保存', 'Verify and save')}
@@ -425,16 +500,25 @@ function RepoCreator({ repo, onClose, onCreated }: { repo?: KnowledgeRepo; onClo
         </Label>
         <Label className="block">
           <div className="mb-1 text-[11px] text-zinc-500">{tr('文档索引分支或 Tag', 'Document indexing branch or tag')}</div>
-          <Input
-            type="text"
+          <Autocomplete
             aria-label={tr('文档索引分支或 Tag', 'Document indexing branch or tag')}
             value={branch}
+            onValueChange={setBranch}
+            options={branchOptions}
             disabled={submitting}
             maxLength={128}
-            onChange={(e) => setBranch(e.target.value)}
-            placeholder="main"
+            placeholder={refsLoading ? tr('正在加载分支…', 'Loading refs…') : tr('选择或输入分支 / Tag', 'Choose or type a branch / tag')}
             className="w-full font-mono"
           />
+          <div className="mt-1 min-h-4 text-[11px] text-zinc-500">
+            {refsLoading
+              ? tr('正在从仓库拉取分支 / Tag…', 'Fetching branches and tags from the repo…')
+              : refsError
+                ? <span className="text-red-300">{tr('拉取分支失败，仍可手动输入。', 'Could not load refs; you can still type one manually.')} {refsError}</span>
+                : refs
+                  ? tr(`已加载 ${refs.branches.length} 个分支、${refs.tags.length} 个 Tag。`, `Loaded ${refs.branches.length} branches and ${refs.tags.length} tags.`)
+                  : tr('填写仓库 URL 后自动加载分支 / Tag。', 'Branches and tags load after you enter the repo URL.')}
+          </div>
         </Label>
         <Label className="block">
           <div className="mb-1 text-[11px] text-zinc-500">{tr('说明（可选）', 'Description (optional)')}</div>

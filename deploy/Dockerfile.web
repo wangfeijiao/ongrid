@@ -32,7 +32,32 @@ RUN --mount=type=cache,target=/root/.npm \
     npm run build
 
 # ---------- Stage 2: nginx + static assets ----------
-FROM nginx:1.27-alpine
+# ubuntu:22.04 + distro nginx (was nginx:1.27-alpine). Same reason as the
+# ongrid image: operators exec into this container to debug (check upstream
+# reachability, tail logs, curl the API through the proxy), so it ships a
+# real shell and the usual Linux toolbox instead of a stripped alpine layer.
+# The rendered SPA is architecture-independent, so it is always built on
+# $BUILDPLATFORM above and just copied in here.
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Asia/Shanghai \
+    LANG=C.UTF-8
+RUN set -eux; \
+    echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries; \
+    for i in 1 2 3 4 5; do \
+        apt-get update && apt-get install -y --no-install-recommends \
+            nginx ca-certificates tzdata \
+            bash bash-completion sudo \
+            procps net-tools iproute2 iputils-ping iputils-tracepath dnsutils \
+            traceroute \
+            python3 \
+            netcat-openbsd telnet \
+            curl wget vim nano less tree unzip zip jq lsof tcpdump file && break; \
+        [ "$i" = 5 ] && exit 1; echo "apt attempt $i failed, retrying in 5s"; sleep 5; \
+    done; \
+    ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime && echo ${TZ} > /etc/timezone; \
+    rm -rf /var/lib/apt/lists/*
 
 # Built SPA assets shipped inside the image so it can serve standalone if
 # operators forget the bind-mount (ADR-008).
@@ -42,4 +67,11 @@ COPY --from=builder /app/dist/ /usr/share/nginx/html/
 # production. Lets the image run as a smoke test image without extra files.
 COPY deploy/nginx/nginx.conf /etc/nginx/nginx.conf
 
+# The distro package ships a default site; our nginx.conf does not include
+# sites-enabled, so drop it to avoid confusion when debugging.
+RUN rm -f /etc/nginx/sites-enabled/default && mkdir -p /var/log/nginx
+
 EXPOSE 80 443
+
+# Distro nginx daemonizes by default; keep PID 1 in the foreground.
+CMD ["nginx", "-g", "daemon off;"]
