@@ -83,6 +83,10 @@ deploy-edge-batch/deploy-result.json
 deploy-edge-batch/deploy-result-*.json
 deploy-edge-batch/probe-result.json
 deploy-edge-batch/probe-result.*.json
+# Timestamped local snapshots (e.g. credentials.json.bak-202610301028) are
+# working-copy scratch files: the name ends with the backup date, so the
+# *.json patterns above never match them.
+deploy-edge-batch/*.bak-*
 deploy-edge-batch/.deploy*.log
 # Upgrade toolchain: staging packages, downloaded assets and run logs
 deploy-edge-batch/upgrade/pkg/
