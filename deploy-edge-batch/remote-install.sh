@@ -20,7 +20,7 @@ SEED_IP=${4:-}
 MANAGER_URL=${5:-}
 TOKEN=${6:-}
 
-VERSION=v0.17.3
+VERSION=v0.19.0
 ARCH=linux-amd64
 BUNDLE=/opt/ongrid-edge-bundle
 DEPS_TAG=edge-deps-layout2-obi0.12.1-o0.157.0-n1.8.2-pr0.8.4-my0.19.0-pg0.19.1-r1.86.0-m0.51.0

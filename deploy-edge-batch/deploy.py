@@ -40,18 +40,20 @@ VERIFY_CMD = (
 )
 
 
-def sudo_wrap(cmd, sudo_mode, password):
-    """按主机 sudo 能力包装命令。"""
+def sudo_wrap(cmd, sudo_mode, password, user="ubuntu"):
+    """按主机 sudo 能力包装命令。root 登录本身已是特权，不再套 sudo。"""
     inner = shlex.quote(cmd)
+    if user == "root":
+        return f"bash -c {inner}"
     if sudo_mode == "nopasswd":
         return f"sudo -n bash -c {inner}"
     return f"printf '%s\\n' {shlex.quote(password)} | sudo -S -p '' bash -c {inner}"
 
 
-def connect(host, password):
+def connect(host, password, user="ubuntu"):
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(host, username="ubuntu", password=password, port=22,
+    client.connect(host, username=user, password=password, port=22,
                    timeout=15, banner_timeout=15, auth_timeout=15,
                    allow_agent=False, look_for_keys=False)
     return client
@@ -83,38 +85,38 @@ def upload(client, files, remote_dir):
     sftp.close()
 
 
-def stage_scripts(client, sudo_mode, password, extra=()):
+def stage_scripts(client, sudo_mode, password, user="ubuntu", extra=()):
     files = [os.path.join(BUNDLE_DIR, name) for name in SCRIPTS]
     files += [os.path.join(BASE, name) for name in UPLOAD_EXTRA + list(extra)]
     upload(client, files, REMOTE_UPLOAD)
     copy_cmd = (f"mkdir -p {REMOTE_BUNDLE} && cp {REMOTE_UPLOAD}/* {REMOTE_BUNDLE}/ "
                 f"&& chmod +x {REMOTE_BUNDLE}/*.sh")
-    rc, out, err = run(client, sudo_wrap(copy_cmd, sudo_mode, password), timeout=120)
+    rc, out, err = run(client, sudo_wrap(copy_cmd, sudo_mode, password, user), timeout=120)
     if rc != 0:
         raise RuntimeError(f"stage scripts failed rc={rc}: {err[:200]}")
     return out
 
 
-def do_seed(host, password, sudo_mode):
-    client = connect(host, password)
+def do_seed(host, password, sudo_mode, user="ubuntu"):
+    client = connect(host, password, user)
     try:
-        stage_scripts(client, sudo_mode, password, extra=[SEED_SCRIPT])
+        stage_scripts(client, sudo_mode, password, user, extra=[SEED_SCRIPT])
         rc, out, err = run(client, sudo_wrap(
-            f"bash {REMOTE_BUNDLE}/{SEED_SCRIPT}", sudo_mode, password), timeout=1800)
+            f"bash {REMOTE_BUNDLE}/{SEED_SCRIPT}", sudo_mode, password, user), timeout=1800)
         return {"ip": host, "ok": rc == 0, "stdout": out, "stderr": err[-800:]}
     finally:
         client.close()
 
 
-def do_install(host, password, sudo_mode, cloud_addr, access_key, secret_key, seed_ip, edge_id):
+def do_install(host, password, sudo_mode, cloud_addr, access_key, secret_key, seed_ip, edge_id, user="ubuntu"):
     started = time.time()
-    client = connect(host, password)
+    client = connect(host, password, user)
     try:
-        stage_scripts(client, sudo_mode, password)
+        stage_scripts(client, sudo_mode, password, user)
         cmd = (f"bash {REMOTE_BUNDLE}/remote-install.sh "
                f"{shlex.quote(cloud_addr)} {shlex.quote(access_key)} {shlex.quote(secret_key)} "
                f"{shlex.quote(seed_ip or '-')}")
-        rc, out, err = run(client, sudo_wrap(cmd, sudo_mode, password), timeout=2400)
+        rc, out, err = run(client, sudo_wrap(cmd, sudo_mode, password, user), timeout=2400)
         return {"ip": host, "ok": rc == 0, "edge_id": edge_id,
                 "seconds": round(time.time() - started, 1),
                 "stdout": out[-2500:], "stderr": err[-1200:]}
@@ -128,10 +130,10 @@ def do_install(host, password, sudo_mode, cloud_addr, access_key, secret_key, se
             pass
 
 
-def do_verify(host, password, sudo_mode):
-    client = connect(host, password)
+def do_verify(host, password, sudo_mode, user="ubuntu"):
+    client = connect(host, password, user)
     try:
-        rc, out, err = run(client, sudo_wrap(VERIFY_CMD, sudo_mode, password), timeout=180)
+        rc, out, err = run(client, sudo_wrap(VERIFY_CMD, sudo_mode, password, user), timeout=180)
         info = dict(re.findall(r"(\w+)=(.*)", out))
         return {"ip": host, "ok": info.get("SERVICE") == "active", "info": info, "stderr": err[-400:]}
     except Exception as exc:  # noqa: BLE001
@@ -192,7 +194,7 @@ def main():
             print("seed host not in probe result; skipping seed phase")
         else:
             print(f"=== seed phase: {seed_ip} ===", flush=True)
-            res = do_seed(seed_ip, seed_host["password"], seed_host.get("sudo", "password"))
+            res = do_seed(seed_ip, seed_host["password"], seed_host.get("sudo", "password"), seed_host.get("user", "ubuntu"))
             result["seed"] = res
             print(res["stdout"][-1500:])
             if not res["ok"]:
@@ -208,7 +210,7 @@ def main():
                 pool.submit(do_install, h["ip"], h["password"], h.get("sudo", "password"),
                             args.cloud_addr, creds[h["ip"]]["access_key"],
                             creds[h["ip"]]["secret_key"], seed_ip,
-                            creds[h["ip"]].get("edge_id")): h["ip"]
+                            creds[h["ip"]].get("edge_id"), h.get("user", "ubuntu")): h["ip"]
                 for h in targets
             }
             for fut in cf.as_completed(futures):
@@ -222,7 +224,7 @@ def main():
     if args.phase in ("all", "verify"):
         print(f"\n=== verify phase ===", flush=True)
         with cf.ThreadPoolExecutor(max_workers=args.parallel) as pool:
-            futures = {pool.submit(do_verify, h["ip"], h["password"], h.get("sudo", "password")): h["ip"]
+            futures = {pool.submit(do_verify, h["ip"], h["password"], h.get("sudo", "password"), h.get("user", "ubuntu")): h["ip"]
                        for h in hosts}
             for fut in cf.as_completed(futures):
                 res = fut.result()

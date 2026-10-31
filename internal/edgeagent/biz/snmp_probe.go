@@ -37,12 +37,19 @@ const (
 	maxSNMPAddresses  = 2048
 )
 
+// probeErrorKindInvalid marks failures caused purely by rejected request
+// parameters (detected before any network call). The manager maps it to a
+// client error instead of the generic conflict, so operators can tell "you
+// must fill this in" apart from "the device refused us". Any other failure
+// (unreachable, timeout, auth rejected) leaves the kind empty on purpose.
+const probeErrorKindInvalid = "invalid"
+
 // ProbeNetworkSNMP performs a bounded read-only identity probe and enriches a
 // successful response with interface state and IPv4 management addresses.
 func ProbeNetworkSNMP(ctx context.Context, req tunnel.ProbeNetworkSNMPRequest) tunnel.ProbeNetworkSNMPResponse {
 	address := strings.TrimSpace(req.Address)
 	if address == "" {
-		return tunnel.ProbeNetworkSNMPResponse{Error: "SNMP address is required"}
+		return tunnel.ProbeNetworkSNMPResponse{Error: "SNMP address is required", ErrorKind: probeErrorKindInvalid}
 	}
 	if req.Port == 0 {
 		req.Port = 161
@@ -74,16 +81,19 @@ func ProbeNetworkSNMP(ctx context.Context, req tunnel.ProbeNetworkSNMPRequest) t
 	if version == "v3" {
 		security, flags, err := usmSecurity(req)
 		if err != nil {
-			return tunnel.ProbeNetworkSNMPResponse{Error: err.Error()}
+			// Every usmSecurity failure is a rejected parameter combination
+			// (empty username, unsupported protocol, missing secret), never a
+			// runtime/network failure.
+			return tunnel.ProbeNetworkSNMPResponse{Error: err.Error(), ErrorKind: probeErrorKindInvalid}
 		}
 		params.Version = gosnmp.Version3
 		params.SecurityParameters = security
 		params.MsgFlags = flags
 	} else if version != "v2c" {
-		return tunnel.ProbeNetworkSNMPResponse{Error: "SNMP version must be v2c or v3"}
+		return tunnel.ProbeNetworkSNMPResponse{Error: "SNMP version must be v2c or v3", ErrorKind: probeErrorKindInvalid}
 	}
 	if version == "v2c" && strings.TrimSpace(req.Community) == "" {
-		return tunnel.ProbeNetworkSNMPResponse{Error: "SNMP community is required for v2c"}
+		return tunnel.ProbeNetworkSNMPResponse{Error: "SNMP community is required for v2c", ErrorKind: probeErrorKindInvalid}
 	}
 
 	if err := ctx.Err(); err != nil {

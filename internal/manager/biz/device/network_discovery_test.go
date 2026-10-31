@@ -218,6 +218,124 @@ func TestValidateSNMPCredentialFields(t *testing.T) {
 			if (err != nil) != test.wantErr {
 				t.Fatalf("err=%v wantErr=%v", err, test.wantErr)
 			}
+			if err != nil && !errors.Is(err, errs.ErrInvalid) {
+				t.Fatalf("err=%v, want invalid argument", err)
+			}
+		})
+	}
+}
+
+func TestValidateSNMPProbeRequest(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		req     tunnel.ProbeNetworkSNMPRequest
+		wantErr bool
+	}{
+		{name: "v2c missing community", req: tunnel.ProbeNetworkSNMPRequest{Version: "v2c"}, wantErr: true},
+		{name: "v2c blank community", req: tunnel.ProbeNetworkSNMPRequest{Version: "v2c", Community: "   "}, wantErr: true},
+		{name: "v2c ok", req: tunnel.ProbeNetworkSNMPRequest{Version: "v2c", Community: "readonly"}},
+		{name: "empty version defaults to v2c", req: tunnel.ProbeNetworkSNMPRequest{Community: "readonly"}},
+		{name: "empty request", req: tunnel.ProbeNetworkSNMPRequest{}, wantErr: true},
+		{name: "v3 missing username", req: tunnel.ProbeNetworkSNMPRequest{Version: "v3"}, wantErr: true},
+		{name: "v3 blank username", req: tunnel.ProbeNetworkSNMPRequest{Version: "v3", Username: "  "}, wantErr: true},
+		{name: "v3 no auth ok", req: tunnel.ProbeNetworkSNMPRequest{Version: "v3", Username: "operator"}},
+		{name: "v3 auth without secret", req: tunnel.ProbeNetworkSNMPRequest{Version: "v3", Username: "operator", AuthProtocol: "sha256"}, wantErr: true},
+		{name: "v3 auth normalised protocol ok", req: tunnel.ProbeNetworkSNMPRequest{Version: "v3", Username: "operator", AuthProtocol: "SHA-256", AuthSecret: "authenticate"}},
+		{name: "v3 unsupported auth protocol", req: tunnel.ProbeNetworkSNMPRequest{Version: "v3", Username: "operator", AuthProtocol: "md9", AuthSecret: "authenticate"}, wantErr: true},
+		{name: "v3 unsupported privacy protocol", req: tunnel.ProbeNetworkSNMPRequest{Version: "v3", Username: "operator", AuthProtocol: "sha256", AuthSecret: "authenticate", PrivacyProtocol: "aes512", PrivacySecret: "private"}, wantErr: true},
+		{name: "v3 privacy without auth", req: tunnel.ProbeNetworkSNMPRequest{Version: "v3", Username: "operator", PrivacyProtocol: "aes256", PrivacySecret: "private"}, wantErr: true},
+		{name: "v3 privacy without secret", req: tunnel.ProbeNetworkSNMPRequest{Version: "v3", Username: "operator", AuthProtocol: "sha256", AuthSecret: "authenticate", PrivacyProtocol: "aes256"}, wantErr: true},
+		{name: "v3 auth privacy ok", req: tunnel.ProbeNetworkSNMPRequest{Version: "v3", Username: "operator", AuthProtocol: "sha256", AuthSecret: "authenticate", PrivacyProtocol: "aes256", PrivacySecret: "private"}},
+		{name: "unknown version", req: tunnel.ProbeNetworkSNMPRequest{Version: "v1", Community: "public"}, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateSNMPProbeRequest(test.req)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("err=%v wantErr=%v", err, test.wantErr)
+			}
+			if err != nil && !errors.Is(err, errs.ErrInvalid) {
+				t.Fatalf("err=%v, want invalid argument", err)
+			}
+		})
+	}
+}
+
+func TestScanAndPromoteCandidateRejectsMissingCommunityLocally(t *testing.T) {
+	candidateRepo := &fakeNetworkDiscoveryRepo{rows: []*model.NetworkDiscoveryCandidate{{
+		ID: 21, ObserverEdgeID: 7, IPAddress: "10.7.30.254", Status: NetworkCandidateStatusIdentified,
+	}}}
+	caller := &fakeNetworkSNMPCaller{response: []byte(`{"ok":true,"ip_address":"10.7.30.254"}`)}
+	uc := NewNetworkDiscoveryUsecase(candidateRepo)
+	uc.SetPromotionDependencies(candidateRepo, &fakeRepo{byID: map[uint64]*model.Device{}}, &fakeLinks{})
+	uc.SetEdgeCaller(caller)
+
+	_, err := uc.ScanAndPromoteCandidate(context.Background(), 21, tunnel.ProbeNetworkSNMPRequest{Version: "v2c"}, "")
+	if !errors.Is(err, errs.ErrInvalid) {
+		t.Fatalf("err=%v, want invalid argument", err)
+	}
+	if errors.Is(err, errs.ErrConflict) {
+		t.Fatalf("err=%v, must not be reported as a conflict", err)
+	}
+	if caller.calls != 0 {
+		t.Fatalf("edge calls=%d, want 0: the request must be rejected before the tunnel", caller.calls)
+	}
+	if candidateRepo.rows[0].Status != NetworkCandidateStatusIdentified {
+		t.Fatalf("status=%q, candidate must stay untouched", candidateRepo.rows[0].Status)
+	}
+}
+
+func TestScanAndPromoteCandidateMapsEdgeFailureKind(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		request tunnel.ProbeNetworkSNMPRequest
+		body    string
+		want    error
+		forbid  error
+	}{
+		{
+			name:    "edge classified parameter error becomes invalid",
+			request: tunnel.ProbeNetworkSNMPRequest{Version: "v3", Username: "operator"},
+			body:    `{"ok":false,"error":"SNMP username is required for v3","error_kind":"invalid"}`,
+			want:    errs.ErrInvalid,
+			forbid:  errs.ErrConflict,
+		},
+		{
+			name:    "legacy edge without kind keeps conflict",
+			request: tunnel.ProbeNetworkSNMPRequest{Version: "v2c", Community: "readonly"},
+			body:    `{"ok":false,"error":"SNMP connect: request timeout (after 3s)"}`,
+			want:    errs.ErrConflict,
+			forbid:  errs.ErrInvalid,
+		},
+		{
+			name:    "unreachable device stays conflict",
+			request: tunnel.ProbeNetworkSNMPRequest{Version: "v2c", Community: "readonly"},
+			body:    `{"ok":false,"error":"SNMP get: no such host","error_kind":""}`,
+			want:    errs.ErrConflict,
+			forbid:  errs.ErrInvalid,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			candidateRepo := &fakeNetworkDiscoveryRepo{rows: []*model.NetworkDiscoveryCandidate{{
+				ID: 22, ObserverEdgeID: 7, IPAddress: "10.7.30.254", Status: NetworkCandidateStatusIdentified,
+			}}}
+			caller := &fakeNetworkSNMPCaller{response: []byte(test.body)}
+			uc := NewNetworkDiscoveryUsecase(candidateRepo)
+			uc.SetPromotionDependencies(candidateRepo, &fakeRepo{byID: map[uint64]*model.Device{}}, &fakeLinks{})
+			uc.SetEdgeCaller(caller)
+
+			_, err := uc.ScanAndPromoteCandidate(context.Background(), 22, test.request, "")
+			if !errors.Is(err, test.want) {
+				t.Fatalf("err=%v, want %v", err, test.want)
+			}
+			if test.forbid != nil && errors.Is(err, test.forbid) {
+				t.Fatalf("err=%v, must not match %v", err, test.forbid)
+			}
+			if caller.calls != 1 {
+				t.Fatalf("edge calls=%d, want 1", caller.calls)
+			}
+			if candidateRepo.rows[0].Status != NetworkCandidateStatusIdentified {
+				t.Fatalf("status=%q, failed verification must not change the candidate", candidateRepo.rows[0].Status)
+			}
 		})
 	}
 }

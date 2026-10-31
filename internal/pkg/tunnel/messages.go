@@ -542,8 +542,15 @@ type ProbeNetworkSNMPRequest struct {
 }
 
 type ProbeNetworkSNMPResponse struct {
-	OK             bool                     `json:"ok"`
-	Error          string                   `json:"error,omitempty"`
+	OK bool `json:"ok"`
+	// Error is the operator-facing failure detail. It intentionally never
+	// echoes credential material.
+	Error string `json:"error,omitempty"`
+	// ErrorKind is the Edge-classified failure kind; empty means unclassified
+	// and callers must fall back to their previous behaviour. Only "invalid"
+	// (request parameters rejected before any network call) is emitted today,
+	// so an older Edge that omits the field keeps the legacy conflict mapping.
+	ErrorKind      string                   `json:"error_kind,omitempty"`
 	IPAddress      string                   `json:"ip_address,omitempty"`
 	SysName        string                   `json:"sys_name,omitempty"`
 	SysDescription string                   `json:"sys_description,omitempty"`

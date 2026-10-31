@@ -185,24 +185,87 @@ func (u *NetworkDiscoveryUsecase) ConfigureNetworkPolling(ctx context.Context, d
 	return u.promotion.GetNetworkDeviceDetail(ctx, deviceID)
 }
 
+// validateSNMPCredentialFields validates a resolved credential document. It is
+// a thin adapter over validateSNMPProbeRequest so the polling path and the
+// one-shot scan path can never drift apart.
 func validateSNMPCredentialFields(fields map[string]string) error {
-	version := strings.ToLower(strings.TrimSpace(fields["version"]))
+	return validateSNMPProbeRequest(tunnel.ProbeNetworkSNMPRequest{
+		Version:         fields["version"],
+		Community:       fields["community"],
+		Username:        fields["username"],
+		AuthProtocol:    fields["auth_protocol"],
+		AuthSecret:      fields["auth_secret"],
+		PrivacyProtocol: fields["privacy_protocol"],
+		PrivacySecret:   fields["privacy_secret"],
+	})
+}
+
+// validateSNMPProbeRequest rejects request/credential combinations that the
+// observing Edge refuses before it opens a socket. The rules are copied from
+// edgeagent biz.ProbeNetworkSNMP + usmSecurity, which stay the authority and
+// keep their own checks as defence in depth; the local copy only exists so the
+// manager can answer with invalid argument (400) instead of spending a
+// cross-tunnel round-trip on a request it can already prove is unusable.
+func validateSNMPProbeRequest(req tunnel.ProbeNetworkSNMPRequest) error {
+	version := strings.ToLower(strings.TrimSpace(req.Version))
 	if version == "" {
 		version = "v2c"
 	}
 	switch version {
 	case "v2c":
-		if strings.TrimSpace(fields["community"]) == "" {
+		if strings.TrimSpace(req.Community) == "" {
 			return fmt.Errorf("%w: SNMP community is required for v2c", errs.ErrInvalid)
 		}
 	case "v3":
-		if strings.TrimSpace(fields["username"]) == "" {
-			return fmt.Errorf("%w: SNMP username is required for v3", errs.ErrInvalid)
+		if err := validateSNMPv3Parameters(req); err != nil {
+			return err
 		}
 	default:
 		return fmt.Errorf("%w: SNMP version must be v2c or v3", errs.ErrInvalid)
 	}
 	return nil
+}
+
+// validateSNMPv3Parameters mirrors the parameter validation performed inside
+// edgeagent biz.usmSecurity, in the same order and with the same messages.
+func validateSNMPv3Parameters(req tunnel.ProbeNetworkSNMPRequest) error {
+	if strings.TrimSpace(req.Username) == "" {
+		return fmt.Errorf("%w: SNMP username is required for v3", errs.ErrInvalid)
+	}
+	authProtocol := normalizeSNMPProbeProtocol(req.AuthProtocol)
+	switch authProtocol {
+	case "", "none", "noauth", "md5", "sha", "sha1", "sha224", "sha256", "sha384", "sha512":
+	default:
+		return fmt.Errorf("%w: unsupported SNMP auth protocol %q", errs.ErrInvalid, req.AuthProtocol)
+	}
+	if authProtocol != "" && authProtocol != "none" && authProtocol != "noauth" {
+		if strings.TrimSpace(req.AuthSecret) == "" {
+			return fmt.Errorf("%w: SNMP auth secret is required for %s", errs.ErrInvalid, req.AuthProtocol)
+		}
+	}
+	privacyProtocol := normalizeSNMPProbeProtocol(req.PrivacyProtocol)
+	switch privacyProtocol {
+	case "", "none", "nopriv", "des", "aes", "aes128", "aes192", "aes256", "aes192c", "aes256c":
+	default:
+		return fmt.Errorf("%w: unsupported SNMP privacy protocol %q", errs.ErrInvalid, req.PrivacyProtocol)
+	}
+	if privacyProtocol != "" && privacyProtocol != "none" && privacyProtocol != "nopriv" {
+		if authProtocol == "" || authProtocol == "none" || authProtocol == "noauth" {
+			return fmt.Errorf("%w: SNMP privacy requires authentication", errs.ErrInvalid)
+		}
+		if strings.TrimSpace(req.PrivacySecret) == "" {
+			return fmt.Errorf("%w: SNMP privacy secret is required for %s", errs.ErrInvalid, req.PrivacyProtocol)
+		}
+	}
+	return nil
+}
+
+// normalizeSNMPProbeProtocol mirrors edgeagent biz.normalizeSNMPProtocol so both
+// sides agree on what counts as "no authentication" ("NoAuth", "none", "no-auth").
+func normalizeSNMPProbeProtocol(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	replacer := strings.NewReplacer("-", "", "_", "", " ", "")
+	return replacer.Replace(value)
 }
 
 // PollDueNetworkDevices collects the latest SNMP snapshot for at most limit
@@ -436,6 +499,9 @@ func (u *NetworkDiscoveryUsecase) ScanAndPromoteCandidate(ctx context.Context, i
 	if strings.TrimSpace(req.Address) == "" {
 		return nil, fmt.Errorf("%w: candidate has no management address", errs.ErrInvalid)
 	}
+	if err := validateSNMPProbeRequest(req); err != nil {
+		return nil, err
+	}
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal SNMP probe: %w", err)
@@ -449,6 +515,14 @@ func (u *NetworkDiscoveryUsecase) ScanAndPromoteCandidate(ctx context.Context, i
 		return nil, fmt.Errorf("decode SNMP probe: %w", err)
 	}
 	if !response.OK {
+		// A rejected-parameter failure is an input error, not a device state
+		// conflict: the operator has to fix the form, not reconcile devices.
+		// Everything else (unreachable, timeout, credential rejected by the
+		// device) keeps the historical conflict mapping, and an older Edge that
+		// omits error_kind keeps it too.
+		if response.ErrorKind == "invalid" {
+			return nil, fmt.Errorf("%w: %s", errs.ErrInvalid, firstNonEmpty(response.Error, "SNMP verification failed"))
+		}
 		return nil, fmt.Errorf("%w: %s", errs.ErrConflict, firstNonEmpty(response.Error, "SNMP verification failed"))
 	}
 	if err := mergeSNMPProbe(candidate, response); err != nil {

@@ -15,8 +15,13 @@ EMAIL = os.environ.get("ONGRID_ADMIN_EMAIL", "admin@ongrid.local")
 PASSWORD = os.environ.get("ONGRID_ADMIN_PASSWORD", "ongrid@2026")
 BASE = os.path.dirname(os.path.abspath(__file__))
 
-# 禁用环境注入的代理，直连本机主控
-opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+# 禁用环境注入的代理，直连主控；主控用自签证书，内网工具不再额外校验链
+import ssl
+
+opener = urllib.request.build_opener(
+    urllib.request.ProxyHandler({}),
+    urllib.request.HTTPSHandler(context=ssl._create_unverified_context()),
+)
 
 
 def api(path, method="GET", body=None, token=None):

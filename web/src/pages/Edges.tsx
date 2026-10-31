@@ -1523,7 +1523,28 @@ function SNMPScanModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const set = <K extends keyof NetworkSNMPScanInput>(key: K, value: NetworkSNMPScanInput[K]) => setInput((prev) => ({ ...prev, [key]: value }));
+  // SNMP v2c needs a community and v3 needs a username. The Edge can only
+  // reject such a request, so the operator is stopped here with a localized
+  // hint instead of discovering the requirement through a raw backend error.
+  // isV2c is the single source of truth for "which credential fields apply":
+  // the derived flags below and the JSX branch must never disagree, otherwise
+  // a version the form does not recognise would render v3 inputs while still
+  // demanding a community (a dead end where submit stays disabled forever).
+  // || 而非 ??：后端 validateSNMPProbeRequest 把空 version 归一化为 v2c，
+  // 前端用同一语义，避免空串时前端按 v3 处理、后端按 v2c 处理。
+  const isV2c = (input.version || "v2c") === "v2c";
+  const communityMissing = isV2c && !(input.community ?? "").trim();
+  const usernameMissing = !isV2c && !(input.username ?? "").trim();
+  const canSubmit = !communityMissing && !usernameMissing;
   async function submit() {
+    if (communityMissing) {
+      setError(tr("SNMP v2c 需要填写 Community：这是设备上配置的只读团体名（常见为 public，请以现场设备为准）", "SNMP v2c requires a community — the read-only string configured on the device (often \"public\", confirm on site)"));
+      return;
+    }
+    if (usernameMissing) {
+      setError(tr("SNMP v3 需要填写 Username", "SNMP v3 requires a username"));
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -1536,7 +1557,7 @@ function SNMPScanModal({
     }
   }
   return (
-    <Modal open onClose={onClose} title={tr("验证网络设备", "Verify network device")} size="lg" footer={<div className="flex justify-end gap-2"><Button onClick={onClose}>{tr("取消", "Cancel")}</Button><Button variant="primary" disabled={busy} onClick={() => void submit()}><ShieldCheck size={13} />{busy ? tr("校验中…", "Verifying…") : tr("校验并加入设备", "Verify and add")}</Button></div>}>
+    <Modal open onClose={onClose} title={tr("验证网络设备", "Verify network device")} size="lg" footer={<div className="flex justify-end gap-2"><Button onClick={onClose}>{tr("取消", "Cancel")}</Button><Button variant="primary" disabled={busy || !canSubmit} onClick={() => void submit()}><ShieldCheck size={13} />{busy ? tr("校验中…", "Verifying…") : tr("校验并加入设备", "Verify and add")}</Button></div>}>
       <div className="space-y-4 text-xs">
         <p className="text-zinc-400">{tr("只有 SNMP 读取成功后，候选设备才会进入全部设备和正式拓扑。凭证不会保存。", "The candidate enters All devices and the formal topology only after a successful SNMP read. Credentials are not stored.")}</p>
         {error && <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-red-300">{error}</div>}
@@ -1546,25 +1567,37 @@ function SNMPScanModal({
           <Label className="text-zinc-400">{tr("版本", "Version")}<Select value={input.version} onValueChange={(selectedValue) => set("version", selectedValue as "v2c" | "v3")} className="mt-1 w-full"><option value="v2c">SNMP v2c</option><option value="v3">SNMP v3</option></Select></Label>
           <Label className="text-zinc-400">Port<Input type="number" value={input.port ?? 161} onChange={(e) => set("port", Number(e.target.value))} className="mt-1 w-full font-mono" /></Label>
         </div>
-        {input.version === "v2c" ? (
-          <Label className="block text-zinc-400">
-            Community
-            <Input
-              value={input.community ?? ""}
-              onChange={(event) => set("community", event.target.value)}
-              className="mt-1 w-full font-mono"
-            />
-          </Label>
-        ) : (
-          <div className="grid grid-cols-2 gap-3">
-            <Label className="text-zinc-400">
-              Username
+        {isV2c ? (
+          <div>
+            <Label className="block text-zinc-400">
+              Community <span className="text-red-400">*</span>
               <Input
-                value={input.username ?? ""}
-                onChange={(event) => set("username", event.target.value)}
-                className="mt-1 w-full"
+                value={input.community ?? ""}
+                onChange={(event) => set("community", event.target.value)}
+                placeholder={tr("设备上配置的只读团体名", "Read-only community configured on the device")}
+                className="mt-1 w-full font-mono"
               />
             </Label>
+            {communityMissing && (
+              <p className="mt-1 text-[11px] text-zinc-500">{tr("必填：填写设备上配置的只读团体名后才能进入校验", "Required: enter the read-only community configured on the device to continue")}</p>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="self-start">
+              <Label className="block text-zinc-400">
+                Username <span className="text-red-400">*</span>
+                <Input
+                  value={input.username ?? ""}
+                  onChange={(event) => set("username", event.target.value)}
+                  placeholder={tr("SNMP v3 用户名", "SNMP v3 username")}
+                  className="mt-1 w-full"
+                />
+              </Label>
+              {usernameMissing && (
+                <p className="mt-1 text-[11px] text-zinc-500">{tr("必填：填写 SNMP v3 用户名后才能进入校验", "Required: enter the SNMP v3 username to continue")}</p>
+              )}
+            </div>
             <Label className="text-zinc-400">
               {tr("认证协议", "Auth protocol")}
               <Select

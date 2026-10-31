@@ -824,6 +824,110 @@ describe("EdgesPage", () => {
     expect(screen.queryByRole("button", { name: "批量安装设备" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "新建设备" })).not.toBeInTheDocument();
   });
+
+  it("SNMP v2c 未填 Community 时阻止提交并给出中文提示", async () => {
+    let scanCalls = 0;
+    server.use(
+      http.get("/api/v1/network-discovery/candidates", () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 31,
+              source: "arp",
+              ip_address: "10.7.30.254",
+              status: "identified",
+              observer_edge_id: 9,
+              observer_host_name: "scanner-host",
+              confidence: 20,
+            },
+          ],
+          total: 1,
+        }),
+      ),
+      http.post("/api/v1/network-discovery/candidates/:id/snmp-scan", () => {
+        scanCalls += 1;
+        return HttpResponse.json(
+          { error: "invalid argument: SNMP connect: request timeout", code: "invalid" },
+          { status: 400 },
+        );
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/devices?view=network-discovery"]}>
+        <EdgesPage />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "配置 SNMP" }));
+
+    const submit = screen.getByRole("button", { name: /校验并加入设备/ });
+    expect(submit).toBeDisabled();
+    expect(
+      screen.getByText(/必填：填写设备上配置的只读团体名/),
+    ).toBeInTheDocument();
+
+    await userEvent.click(submit);
+    expect(scanCalls).toBe(0);
+
+    await userEvent.type(screen.getByLabelText(/Community/), "public");
+    const enabled = screen.getByRole("button", { name: /校验并加入设备/ });
+    expect(enabled).toBeEnabled();
+
+    await userEvent.click(enabled);
+    await waitFor(() => expect(scanCalls).toBe(1));
+  });
+
+  it("SNMP v3 未填 Username 时阻止提交并给出中文提示", async () => {
+    let scanCalls = 0;
+    server.use(
+      http.get("/api/v1/network-discovery/candidates", () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 32,
+              source: "arp",
+              ip_address: "10.7.30.254",
+              status: "identified",
+              observer_edge_id: 9,
+              observer_host_name: "scanner-host",
+              confidence: 20,
+            },
+          ],
+          total: 1,
+        }),
+      ),
+      http.post("/api/v1/network-discovery/candidates/:id/snmp-scan", () => {
+        scanCalls += 1;
+        return HttpResponse.json(
+          { error: "invalid argument: SNMP connect: request timeout", code: "invalid" },
+          { status: 400 },
+        );
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/devices?view=network-discovery"]}>
+        <EdgesPage />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "配置 SNMP" }));
+    await selectOption(screen.getByLabelText(/版本/), "SNMP v3");
+
+    const submit = await screen.findByRole("button", { name: /校验并加入设备/ });
+    expect(submit).toBeDisabled();
+    expect(
+      screen.getByText(/必填：填写 SNMP v3 用户名后才能进入校验/),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Community/)).not.toBeInTheDocument();
+
+    await userEvent.click(submit);
+    expect(scanCalls).toBe(0);
+
+    await userEvent.type(screen.getByLabelText(/Username/), "operator");
+    expect(screen.getByRole("button", { name: /校验并加入设备/ })).toBeEnabled();
+  });
 });
 
 function LocationProbe() {

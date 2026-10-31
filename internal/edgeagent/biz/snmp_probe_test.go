@@ -30,6 +30,11 @@ func TestProbeNetworkSNMPValidatesCredentialsBeforeNetworkCall(t *testing.T) {
 			if got.OK || !strings.Contains(strings.ToLower(got.Error), tt.want) {
 				t.Fatalf("response=%+v, want error containing %q", got, tt.want)
 			}
+			// Every case above is a rejected parameter, so the manager must be
+			// able to tell it apart from a runtime/network failure.
+			if got.ErrorKind != probeErrorKindInvalid {
+				t.Fatalf("error kind=%q, want %q", got.ErrorKind, probeErrorKindInvalid)
+			}
 		})
 	}
 }
@@ -56,6 +61,10 @@ func TestProbeNetworkSNMPCancelledContext(t *testing.T) {
 	})
 	if got.OK || !strings.Contains(got.Error, "canceled") {
 		t.Fatalf("response=%+v, want cancelled error", got)
+	}
+	// A cancelled context is a runtime failure, not a parameter error: no kind.
+	if got.ErrorKind != "" {
+		t.Fatalf("error kind=%q, want empty for a runtime failure", got.ErrorKind)
 	}
 }
 

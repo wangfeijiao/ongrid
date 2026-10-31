@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-VERSION=v0.17.3
+VERSION=v0.19.0
 ARCH=linux-amd64
 SRC=/opt/ongrid-edge-src
 PORT=8000

@@ -7,8 +7,8 @@ import sys
 
 import paramiko
 
-HOSTS_FILE = sys.argv[1] if len(sys.argv) > 1 else "hosts.txt"
-USER = "ubuntu"
+HOSTS_FILE = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else "hosts.txt"
+USERS = ["ubuntu"]
 PASSWORDS = ["Ahjkii@2026", "Ahjkii@2025"]  # 优先试新密码
 
 PROBE_CMD = (
@@ -24,41 +24,45 @@ PROBE_CMD = (
 
 
 def probe(ip):
-    result = {"ip": ip, "ok": False, "password": None, "raw": "", "error": ""}
-    for pwd in PASSWORDS:
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        try:
-            client.connect(
-                ip, username=USER, password=pwd,
-                port=22, timeout=12, banner_timeout=12,
-                auth_timeout=12, allow_agent=False, look_for_keys=False,
-            )
-            _, stdout, stderr = client.exec_command(PROBE_CMD, timeout=30)
-            out = stdout.read().decode("utf-8", "replace")
-            err = stderr.read().decode("utf-8", "replace")
-            # 需要密码的 sudo：验证能否用同一口令提权（决定批量部署方式）
-            sudo_cmd = (
-                "if sudo -n true 2>/dev/null; then echo SUDO_MODE=nopasswd; "
-                f"elif printf '%s\\n' '{pwd}' | sudo -S -p '' true 2>/dev/null; "
-                "then echo SUDO_MODE=password; else echo SUDO_MODE=denied; fi"
-            )
-            _, so, _ = client.exec_command(sudo_cmd, timeout=30)
-            out += "\n" + so.read().decode("utf-8", "replace")
-            result.update(ok=True, password=pwd, raw=out, error=err.strip())
-            client.close()
-            return result
-        except Exception as exc:  # noqa: BLE001
-            result["error"] = f"{type(exc).__name__}: {exc}"
+    result = {"ip": ip, "ok": False, "password": None, "user": None, "raw": "", "error": ""}
+    for user in USERS:
+        for pwd in PASSWORDS:
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             try:
+                client.connect(
+                    ip, username=user, password=pwd,
+                    port=22, timeout=12, banner_timeout=12,
+                    auth_timeout=12, allow_agent=False, look_for_keys=False,
+                )
+                _, stdout, stderr = client.exec_command(PROBE_CMD, timeout=30)
+                out = stdout.read().decode("utf-8", "replace")
+                err = stderr.read().decode("utf-8", "replace")
+                # root 登录本身就是特权，不再探测 sudo；其余用户验证能否用同一口令提权
+                if user == "root":
+                    sudo_cmd = "echo SUDO_MODE=root"
+                else:
+                    sudo_cmd = (
+                        "if sudo -n true 2>/dev/null; then echo SUDO_MODE=nopasswd; "
+                        f"elif printf '%s\\n' '{pwd}' | sudo -S -p '' true 2>/dev/null; "
+                        "then echo SUDO_MODE=password; else echo SUDO_MODE=denied; fi"
+                    )
+                _, so, _ = client.exec_command(sudo_cmd, timeout=30)
+                out += "\n" + so.read().decode("utf-8", "replace")
+                result.update(ok=True, password=pwd, user=user, raw=out, error=err.strip())
                 client.close()
-            except Exception:  # noqa: BLE001
-                pass
-        finally:
-            try:
-                client.close()
-            except Exception:  # noqa: BLE001
-                pass
+                return result
+            except Exception as exc:  # noqa: BLE001
+                result["error"] = f"{type(exc).__name__}: {exc}"
+                try:
+                    client.close()
+                except Exception:  # noqa: BLE001
+                    pass
+            finally:
+                try:
+                    client.close()
+                except Exception:  # noqa: BLE001
+                    pass
     return result
 
 
@@ -72,6 +76,7 @@ def parse(result):
         "ip": result["ip"],
         "ok": True,
         "password": result["password"],
+        "user": result.get("user") or "ubuntu",
         "kernel": lines[0] if len(lines) > 0 else "?",
         "arch": lines[1] if len(lines) > 1 else "?",
         "os": ";".join(ln for ln in lines if ln.startswith(("ID=", "VERSION_ID="))),
@@ -88,6 +93,17 @@ def parse(result):
 
 
 def main():
+    global USERS, PASSWORDS
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if args:
+        globals()["HOSTS_FILE"] = args[0]
+    for flag in sys.argv[1:]:
+        if flag.startswith("--users="):
+            USERS = [x.strip() for x in flag.split("=", 1)[1].split(",") if x.strip()]
+        elif flag.startswith("--passwords="):
+            PASSWORDS = [x.strip() for x in flag.split("=", 1)[1].split(",") if x.strip()]
+    print(f"users={USERS} passwords={len(PASSWORDS)} 个")
+
     with open(HOSTS_FILE, encoding="utf-8") as fh:
         hosts = [ln.strip() for ln in fh if ln.strip() and not ln.startswith("#")]
     for host in hosts:
@@ -101,9 +117,9 @@ def main():
             res = parse(fut.result())
             results.append(res)
             if res.get("ok"):
-                print(f"OK   {res['ip']:>15}  arch={res['arch_norm']:<6} sudo={res['sudo']:<14} "
-                      f"systemd={res['systemd']:<3} edge_installed={res['edge_installed']} "
-                      f"pwd={res['password']}", flush=True)
+                print(f"OK   {res['ip']:>15}  user={res.get('user', '?'):<7} arch={res['arch_norm']:<6} "
+                      f"sudo={res['sudo']:<14} systemd={res['systemd']:<3} "
+                      f"edge_installed={res['edge_installed']} pwd={res['password']}", flush=True)
             else:
                 print(f"FAIL {res['ip']:>15}  {res.get('error', '')[:90]}", flush=True)
 
