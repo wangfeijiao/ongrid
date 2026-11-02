@@ -151,7 +151,7 @@ export function KubernetesCapture({ cluster, canEdit }: { cluster: KubernetesClu
               <td className="text-right">{canEdit && <Button size="sm" variant="subtle" disabled={!!editor || saving} aria-label={tr(`编辑 ${rule.workload_name || rule.namespace}`, `Edit ${rule.workload_name || rule.namespace}`)} onClick={() => begin(index)}><Pencil size={14} aria-hidden="true" />{tr('编辑', 'Edit')}</Button>}</td>
             </tr>)}</tbody>
           </table></div>}
-          {canEdit && <div className="flex items-center justify-between gap-3 px-4 py-3"><Button variant="subtle" disabled={!!editor || rules.length >= 100} onClick={() => begin(-1)}><Plus size={16} aria-hidden="true" />{tr('添加采集目标', 'Add capture target')}</Button><span className="text-xs tabular-nums text-text-faint">{rules.length} / 100</span></div>}
+          {canEdit && <div className="flex items-center justify-between gap-3 px-4 py-3"><Button variant="subtle" disabled={!!editor || rules.length >= 350} onClick={() => begin(-1)}><Plus size={16} aria-hidden="true" />{tr('添加采集目标', 'Add capture target')}</Button><span className="text-xs tabular-nums text-text-faint">{rules.length} / 350</span></div>}
         </Card>
         {editor && <Modal open size="lg" title={editor.index < 0 ? tr('添加采集目标', 'Add capture target') : tr('编辑采集目标', 'Edit capture target')} onClose={() => { if (!saving) { setEditor(undefined); setError(''); } }} footer={<>
           {editor.index >= 0 && <Button className="mr-auto" variant="dangerGhost" disabled={saving} onClick={() => void persist(rules.filter((_, index) => index !== editor.index))}><Trash2 size={14} aria-hidden="true" />{tr('移除目标', 'Remove target')}</Button>}

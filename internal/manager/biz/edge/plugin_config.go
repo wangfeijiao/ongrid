@@ -405,6 +405,14 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 		if err != nil {
 			return nil, fmt.Errorf("%w: marshal spec: %v", errs.ErrInvalid, err)
 		}
+		// spec_json is MySQL TEXT; reject oversized autoapm specs here instead of
+		// letting the insert fail with Error 1406. Checked on the write path only,
+		// so configs saved under older limits stay readable.
+		if plugin == model.PluginNameAutoAPM {
+			if err := autoapm.CheckSpecSize(blob); err != nil {
+				return nil, fmt.Errorf("%w: %s", errs.ErrInvalid, err)
+			}
+		}
 		specJSON = string(blob)
 	}
 	row, err := uc.repo.Upsert(ctx, &model.PluginConfig{

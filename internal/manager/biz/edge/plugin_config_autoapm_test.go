@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	model "github.com/ongridio/ongrid/internal/manager/model/edge"
 	"github.com/ongridio/ongrid/internal/pkg/autoapm"
+	"strings"
 	"testing"
 )
 
@@ -279,5 +281,34 @@ func TestKubernetesTelemetryIdentityIsManagerOwned(t *testing.T) {
 		if snapshot.Configs["logs"].Spec["cluster_id"] != "132" {
 			t.Fatal("container logs lost their existing unified identity")
 		}
+	}
+}
+
+// TestAutoAPMRejectsSpecLargerThanTheStorageColumn proves the byte guard is wired
+// into the write path: spec_json is MySQL TEXT, so an oversized spec must fail
+// here with a fixable error instead of reaching the database as Error 1406.
+func TestAutoAPMRejectsSpecLargerThanTheStorageColumn(t *testing.T) {
+	ctx := context.Background()
+	uc := NewPluginConfigUC(newFakePluginConfigRepo(), nil, fakeEndpointResolver{}, nil)
+	targets := func(count int, pathLen int) []interface{} {
+		out := make([]interface{}, count)
+		for i := range out {
+			out[i] = map[string]interface{}{
+				"executable":   fmt.Sprintf("/opt/service-%d", i+1),
+				"port":         i + 1,
+				"service_name": fmt.Sprintf("service-%d", i+1),
+				"log_path":     fmt.Sprintf("/var/log/%0*d/app.log", pathLen, i),
+			}
+		}
+		return out
+	}
+	// The largest selection observed in production stays writable.
+	if _, err := uc.Set(ctx, 1, "autoapm", SetInput{Spec: map[string]interface{}{"targets": targets(105, 20)}}); err != nil {
+		t.Fatalf("requirement-sized spec rejected: %v", err)
+	}
+	// A spec inside the count cap but past the column size is rejected at write time.
+	_, err := uc.Set(ctx, 1, "autoapm", SetInput{Spec: map[string]interface{}{"targets": targets(350, 200)}})
+	if err == nil || !strings.Contains(err.Error(), "60000") || !strings.Contains(err.Error(), "storage limit") {
+		t.Fatalf("oversized spec accepted by the write path: %v", err)
 	}
 }

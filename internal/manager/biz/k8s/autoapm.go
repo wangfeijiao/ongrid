@@ -87,6 +87,11 @@ func (u *Usecase) SetAutoAPM(ctx context.Context, clusterID uint64, raw map[stri
 	if err != nil {
 		return nil, fmt.Errorf("encode cluster capture settings: %w", err)
 	}
+	// auto_apm_config_json is MySQL TEXT; reject oversized specs before the write
+	// so the API returns a fixable error instead of Error 1406 from the database.
+	if err := autoapm.CheckSpecSize(body); err != nil {
+		return nil, fmt.Errorf("%w: %s", errs.ErrInvalid, err)
+	}
 	if err := u.repo.UpdateAutoAPM(ctx, clusterID, string(body)); err != nil {
 		return nil, err
 	}

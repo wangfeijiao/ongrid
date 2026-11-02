@@ -1,6 +1,114 @@
 package autoapm
 
-import "testing"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"testing"
+)
+
+// targetsOfCount builds count distinct host targets. Every target needs a
+// unique executable+port pair, so the loop varies both.
+func targetsOfCount(count int) []Target {
+	out := make([]Target, count)
+	for i := range out {
+		out[i] = Target{Executable: fmt.Sprintf("/opt/app-%d", i+1), Port: uint16(i + 1), ServiceName: "app"}
+	}
+	return out
+}
+
+// rulesOfCount builds count non-overlapping workload selectors in one namespace.
+func rulesOfCount(count int) []KubernetesRule {
+	out := make([]KubernetesRule, count)
+	for i := range out {
+		out[i] = KubernetesRule{Namespace: "shop", WorkloadKind: "Deployment", WorkloadName: fmt.Sprintf("api-%d", i+1)}
+	}
+	return out
+}
+
+func TestHostTargetCap(t *testing.T) {
+	if parsed, err := Parse(Spec{Targets: targetsOfCount(MaxTargets)}.Map()); err != nil || len(parsed.Targets) != MaxTargets {
+		t.Fatalf("cap-many targets rejected: %d %v", len(parsed.Targets), err)
+	}
+	_, err := Parse(Spec{Targets: targetsOfCount(MaxTargets + 1)}.Map())
+	if err == nil || !strings.Contains(err.Error(), "at most 350 targets") {
+		t.Fatalf("overflowing targets accepted: %v", err)
+	}
+}
+
+func TestKubernetesRuleCap(t *testing.T) {
+	if parsed, err := Parse(Spec{Kubernetes: &Kubernetes{Rules: rulesOfCount(MaxTargets)}}.Map()); err != nil || len(parsed.Kubernetes.Rules) != MaxTargets {
+		t.Fatalf("cap-many Kubernetes rules rejected: %d %v", len(parsed.Kubernetes.Rules), err)
+	}
+	_, err := Parse(Spec{Kubernetes: &Kubernetes{Rules: rulesOfCount(MaxTargets + 1)}}.Map())
+	if err == nil || !strings.Contains(err.Error(), "at most 350 Kubernetes rules") {
+		t.Fatalf("overflowing Kubernetes rules accepted: %v", err)
+	}
+}
+
+// TestObservedRequirementFitsSpecJSONColumn pins the budget that motivated the
+// cap rather than the cap itself: MaxTargets is a count, while MySQL TEXT
+// (65535 bytes) is a byte budget, so the meaningful invariant is that the
+// largest selection actually observed in production still serializes well
+// inside the column. Adding fields or longer defaults per target fails here
+// before it fails a save with Error 1406.
+func TestObservedRequirementFitsSpecJSONColumn(t *testing.T) {
+	const observedTargets = 105
+	targets := make([]Target, observedTargets)
+	for i := range targets {
+		target := Target{
+			Executable:       fmt.Sprintf("/opt/service-%d", i+1),
+			Port:             uint16(i + 1),
+			ServiceName:      fmt.Sprintf("service-%d", i+1),
+			ServiceNamespace: "production",
+			LogPath:          fmt.Sprintf("/var/log/service-%d/app.log", i+1),
+			Environment:      "production",
+		}
+		target.TargetID = target.ID()
+		targets[i] = target
+	}
+	body, err := json.Marshal(Spec{Environment: "production", Targets: targets}.Map())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) > 65535 {
+		t.Fatalf("%d targets with log paths serialize to %d bytes and no longer fit a MySQL TEXT column (65535); reduce per-target payload or migrate the spec columns to MEDIUMTEXT", observedTargets, len(body))
+	}
+}
+
+// TestSpecByteLimit covers the write-path guard: a spec the column can hold is
+// accepted, one byte over is rejected with the actual size in the message so the
+// caller knows how much to remove, and the count cap alone is not a substitute
+// for the byte check.
+func TestSpecByteLimit(t *testing.T) {
+	if MaxSpecBytes != 60000 {
+		t.Fatalf("byte limit changed without re-checking the TEXT column: %d", MaxSpecBytes)
+	}
+	for _, size := range []int{MaxSpecBytes - 100, MaxSpecBytes} {
+		if err := CheckSpecSize(make([]byte, size)); err != nil {
+			t.Fatalf("%d bytes must be accepted: %v", size, err)
+		}
+	}
+	for _, size := range []int{MaxSpecBytes + 1, MaxSpecBytes + 100} {
+		err := CheckSpecSize(make([]byte, size))
+		if err == nil || !strings.Contains(err.Error(), "60000") || !strings.Contains(err.Error(), fmt.Sprint(size)) {
+			t.Fatalf("%d bytes must be rejected with both sizes in the message: %v", size, err)
+		}
+	}
+	// MaxTargets alone is not a byte guarantee: the highest allowed count with
+	// long log paths is a spec the guard has to reject.
+	targets := make([]Target, MaxTargets)
+	for i := range targets {
+		targets[i] = Target{Executable: fmt.Sprintf("/opt/service-%d", i+1), Port: uint16(i + 1), ServiceName: fmt.Sprintf("service-%d", i+1), LogPath: "/var/log/" + strings.Repeat("a", 180) + fmt.Sprint(i)}
+	}
+	body, err := json.Marshal(Spec{Targets: targets}.Map())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckSpecSize(body); err == nil {
+		t.Fatalf("%d targets with long log paths (%d bytes) must be rejected by the byte guard", MaxTargets, len(body))
+	}
+}
 
 func TestTargetIdentitySurvivesParseAndSelectorEdits(t *testing.T) {
 	target := Target{Executable: "/opt/orders", Port: 8080, ServiceName: "orders"}

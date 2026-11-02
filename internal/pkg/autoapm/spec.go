@@ -14,7 +14,35 @@ import (
 	"github.com/google/uuid"
 )
 
-const MaxTargets = 100
+// MaxTargets caps how many targets a device may select; it is bounded by
+// storage, not by UI preference. The spec is serialized into
+// host_plugin_configs.spec_json, a MySQL TEXT column capped at 65535 bytes, and
+// production runs with STRICT_TRANS_TABLES, so an oversized spec fails the save
+// with Error 1406 instead of truncating. One serialized target costs roughly
+// 172-222 bytes (36-byte UUID target_id, service identity, optional log_path),
+// so a TEXT column overflows somewhere between ~295 targets that carry log
+// paths and ~430 targets that do not. 350 leaves ample room for the current
+// requirement (105 targets of the largest observed shape ≈ 23 KB), and
+// MaxSpecBytes backs the count up with the byte-level check a count cannot
+// express.
+const MaxTargets = 350
+
+// MaxSpecBytes bounds the serialized spec a write path may store. The column is
+// MySQL TEXT (65535 bytes); 60000 keeps ~8% headroom so dialect/charset
+// differences cannot turn an accepted spec into Error 1406. Write paths call
+// CheckSpecSize on the exact bytes they are about to store instead of Parse
+// doing it, because Parse also runs on read paths and configs saved under older
+// limits must stay readable.
+const MaxSpecBytes = 60000
+
+// CheckSpecSize reports whether a serialized spec fits a spec_json column.
+func CheckSpecSize(blob []byte) error {
+	if len(blob) > MaxSpecBytes {
+		return fmt.Errorf("auto APM: spec is %d bytes serialized, exceeding the %d-byte storage limit; reduce targets or shorten log paths", len(blob), MaxSpecBytes)
+	}
+	return nil
+}
+
 const MaxCandidates = 200
 
 type Target struct {

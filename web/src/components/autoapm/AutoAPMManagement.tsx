@@ -97,18 +97,20 @@ export function AutoAPMManagement({ canEdit, initialEdgeId, initialScope }: Prop
       {loading ? <p role="status" className="p-8 text-center text-sm text-text-muted">{tr('正在加载设备…', 'Loading devices…')}</p>
         : deviceError ? <div role="alert"><EmptyState title={tr('设备加载失败', 'Could not load devices')} hint={deviceError} action={<Button onClick={() => setRefresh(value => value + 1)}>{tr('重试', 'Retry')}</Button>} /></div>
           : !filtered.length ? <EmptyState icon={Server} title={edges.length ? tr('没有匹配的设备', 'No matching devices') : tr('尚未接入设备', 'No devices connected')} hint={edges.length ? tr('调整搜索条件或连接状态筛选。', 'Adjust your search or connection filter.') : tr('接入 Edge 后，设备会自动出现在这里。', 'Devices appear here after connecting an Edge.')} />
-            : <div className="overflow-x-auto"><table className="og-resource-table min-w-[760px]">
+            : <div className="overflow-x-auto"><table className="og-resource-table min-w-[900px]">
               <thead className="border-b border-border bg-bg text-left text-xs text-text-muted"><tr>
                 <th className="px-4 py-3 font-medium">{tr('设备', 'Device')}</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium">{tr('设备 IP', 'Device IP')}</th>
                 <th>{tr('默认环境', 'Default environment')}</th>
                 <th className="px-4 py-3 font-medium">{tr('发现状态', 'Discovery status')}</th>
-                <th className="px-4 py-3 text-right font-medium">{tr('发现进程', 'Discovered')}</th>
-                <th className="px-4 py-3 text-right font-medium">{tr('采集目标', 'Targets')}</th>
-                <th className="px-4 py-3 font-medium">{tr('最近上报', 'Last report')}</th>
-                <th className="px-4 py-3 text-right font-medium">{tr('操作', 'Actions')}</th>
+                <th className="whitespace-nowrap px-4 py-3 text-right font-medium">{tr('发现进程', 'Discovered')}</th>
+                <th className="whitespace-nowrap px-4 py-3 text-right font-medium">{tr('采集目标', 'Targets')}</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium">{tr('最近上报', 'Last report')}</th>
+                <th className="whitespace-nowrap px-4 py-3 text-right font-medium">{tr('操作', 'Actions')}</th>
               </tr></thead>
               <tbody className="divide-y divide-border">{visible.map(edge => {
                 const deviceName = edge.device?.name || edge.device?.hostname || edge.device_name || edge.name;
+                const ipAddress = edge.device?.ip_address?.trim() ?? '';
                 const entry = entries[edge.device_id];
                 const health = entry?.row?.health;
                 const fresh = edge.status === 'online' && !!health?.reported_at && Date.now() - Date.parse(health.reported_at) <= 90000;
@@ -118,12 +120,13 @@ export function AutoAPMManagement({ canEdit, initialEdgeId, initialScope }: Prop
                 const status = edge.status !== 'online' ? tr('离线', 'Offline') : !fresh ? tr('等待上报', 'Awaiting report') : discovering ? tr('发现中', 'Discovering') : tr('等待应用配置', 'Applying settings');
                 return <tr key={edge.device_id}>
                   <td className="max-w-md"><div className="flex min-w-0 items-center gap-2"><Server size={14} aria-hidden="true" className="shrink-0 text-text-muted" /><Link className="og-resource-link truncate" title={deviceName} to={`/devices/${edge.device_id}`}>{deviceName}</Link><span className="shrink-0 text-xs text-text-faint">#{edge.device_id}</span></div>{edge.clusters.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{edge.clusters.map(cluster => <ClusterChipLink key={cluster.id} to={`/clusters/${cluster.id}`} name={cluster.name} title={tr(`所属集群：${cluster.name}`, `Cluster: ${cluster.name}`)} />)}</div>}</td>
+                  <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-text-muted" title={ipAddress || undefined}>{ipAddress || '—'}</td>
                   <td className="max-w-48 text-text-muted">{edge.device_id && <DeviceEnvironment key={`${edge.device_id}-${refresh}`} deviceId={edge.device_id} deviceName={deviceName} canEdit={canEdit} />}</td>
                   <td className="max-w-56 px-4 py-3">{failure ? <><Chip tone="warning">{tr('需要处理', 'Needs attention')}</Chip><p title={failure} className="mt-1 truncate text-xs text-text-muted">{failure}</p></> : <span className="inline-flex items-center gap-2 whitespace-nowrap text-xs text-text-muted"><span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${discovering ? 'bg-emerald-500' : 'bg-zinc-500'}`} />{status}</span>}</td>
-                  <td className="px-4 py-3 text-right tabular-nums text-text-muted">{discovering && !failure ? groupDiscoveredProcesses(health?.candidates).length : '—'}</td>
-                  <td className="px-4 py-3 text-right tabular-nums text-text-muted">{entry?.row ? count || <span className="text-xs text-text-faint">{tr('未配置', 'Not configured')}</span> : '—'}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-text-muted">{discovering && !failure ? groupDiscoveredProcesses(health?.candidates).length : '—'}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-text-muted">{entry?.row ? count || <span className="text-xs text-text-faint">{tr('未配置', 'Not configured')}</span> : '—'}</td>
                   <td className="whitespace-nowrap px-4 py-3 text-xs text-text-muted" title={health?.reported_at}>{health?.reported_at ? relativeTime(health.reported_at) : '—'}</td>
-                  <td className="px-4 py-3 text-right"><Link className="og-button" data-size="sm" data-variant="subtle" to={`/apm/capture/devices/${edge.device_id}`}>{canEdit ? tr('配置采集', 'Configure capture') : tr('查看配置', 'View settings')}<ChevronRight size={14} aria-hidden="true" /></Link></td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right"><Link className="og-button" data-size="sm" data-variant="subtle" to={`/apm/capture/devices/${edge.device_id}`}>{canEdit ? tr('配置采集', 'Configure capture') : tr('查看配置', 'View settings')}<ChevronRight size={14} aria-hidden="true" /></Link></td>
                 </tr>;
               })}</tbody>
             </table></div>}

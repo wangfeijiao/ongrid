@@ -29,9 +29,14 @@ it('links to a dedicated capture page without opening a dialog', async () => {
   render(<AutoAPMManagement canEdit initialEdgeId={null} />);
   await screen.findByText('Discovering');
   expect(screen.getByRole('columnheader', { name: 'Default environment' })).toBeInTheDocument();
+  // 「设备 IP」是新增的第 2 列：表头存在，且设备没有 IP 时回退显示 —。
+  expect(screen.getByRole('columnheader', { name: 'Device IP' })).toBeInTheDocument();
+  expect(within(screen.getAllByRole('row')[1]).getAllByRole('cell')[1]).toHaveTextContent('—');
+  // 空值不能渲染 title=""（会弹出空气泡），title 必须整体省略。
+  expect(within(screen.getAllByRole('row')[1]).getAllByRole('cell')[1]).not.toHaveAttribute('title');
   expect(await screen.findByRole('button', { name: 'Set default environment for Ubuntu' })).toHaveTextContent('production');
   expect(screen.getByRole('link', { name: 'Configure capture' })).toHaveAttribute('href', '/apm/capture/devices/650');
-  expect(within(screen.getAllByRole('row')[1]).getAllByRole('cell')[3]).toHaveTextContent('1');
+  expect(within(screen.getAllByRole('row')[1]).getAllByRole('cell')[4]).toHaveTextContent('1');
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(setEdgePlugin).not.toHaveBeenCalled();
 });
@@ -48,10 +53,22 @@ it('uses device identity and topology membership independently of collector name
   render(<AutoAPMManagement canEdit initialEdgeId={null} />);
   expect(await screen.findByRole('link', { name: 'Orders host' })).toHaveAttribute('href', '/devices/650');
   expect(screen.queryByText('orders-01 · 10.0.0.5')).not.toBeInTheDocument();
+  // IP 在独立的「设备 IP」列展示，不拼接进设备名。
+  expect(screen.getByRole('columnheader', { name: 'Device IP' })).toBeInTheDocument();
+  expect(screen.getByText('10.0.0.5')).toBeInTheDocument();
+  expect(within(screen.getAllByRole('row')[1]).getAllByRole('cell')[1]).toHaveTextContent('10.0.0.5');
   expect(screen.getByRole('link', { name: 'Cluster bare-metal-prod' })).toHaveAttribute('href', '/clusters/95');
   expect(screen.queryByRole('link', { name: 'Cluster prod-hosts' })).not.toBeInTheDocument();
   fireEvent.change(screen.getByRole('searchbox', { name: 'Search devices' }), { target: { value: 'bare-metal-prod' } });
   expect(screen.getByRole('link', { name: 'Orders host' })).toBeInTheDocument();
+});
+it('falls back to an em dash when the device IP is only whitespace', async () => {
+  vi.mocked(listDevices).mockResolvedValue({ items: [{ id: 650, name: 'Ubuntu', roles: ['host'], current_edge_id: 67, ip_address: '   ' }], total: 1 });
+  render(<AutoAPMManagement canEdit initialEdgeId={null} />);
+  await screen.findByRole('link', { name: 'Ubuntu' });
+  const ipCell = within(screen.getAllByRole('row')[1]).getAllByRole('cell')[1];
+  expect(ipCell).toHaveTextContent('—');
+  expect(ipCell).not.toHaveAttribute('title');
 });
 it('does not present stale discovery as current results', async () => {
   vi.mocked(listHostPlugins).mockResolvedValue({ items: [{ plugin_name: 'autoapm', enabled: true, health: { state: 'running', reported_at: '2000-01-01T00:00:00Z', candidates: [{ executable: '/opt/stale', port: 8080, pid: 1 }] } }] });
