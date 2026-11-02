@@ -89,3 +89,6 @@ deploy-edge-batch/upgrade/pkg/
 deploy-edge-batch/upgrade/cache/
 deploy-edge-batch/upgrade/*.log
 deploy-edge-batch/upgrade/*-result.json
+
+# Vite local build cache
+web/.vite/
