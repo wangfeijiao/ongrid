@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { usePermissions } from '@/store/me';
 import { EmptyStateCard } from '@/components/ui';
 import { Autocomplete, Button, Label, Input, Textarea, type AutocompleteOption } from '@/components/ui';
@@ -159,6 +160,13 @@ export default function KnowledgeReposPage() {
       setSyncingID(null);
     }
   };
+
+  useAssistantPage('知识仓库', 'Knowledge repositories', {
+    repository_count: items.length,
+    sample_repo_ids: items.slice(0, 8).map(item => item.id).join(', '),
+    syncing_repo_id: syncingID,
+    loading,
+  });
 
   return (
     <main className="anim-fade flex flex-1 flex-col overflow-hidden">
