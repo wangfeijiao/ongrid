@@ -98,6 +98,17 @@ func bootstrapAutomation(rootCtx context.Context, cfg *config.Config, log *slog.
 			// operator override for rare cases.
 			sumProvider := os.Getenv("ONGRID_INVESTIGATOR_SUMMARIZER_PROVIDER")
 			sumModel := os.Getenv("ONGRID_INVESTIGATOR_SUMMARIZER_MODEL")
+			// Keep in sync with investigator.NewUsecase's default. That
+			// default was raised to 120s for slower reasoning models, but
+			// this bootstrap used to pin 30s explicitly, overriding it and
+			// making every Pass-2 structured extraction time out on busy
+			// clusters. Operators can tune it without a rebuild.
+			sumTimeout := 120 * time.Second
+			if v := os.Getenv("ONGRID_INVESTIGATOR_SUMMARIZER_TIMEOUT"); v != "" {
+				if n, err := strconv.Atoi(v); err == nil && n > 0 {
+					sumTimeout = time.Duration(n) * time.Second
+				}
+			}
 			rcaInvConcrete = investigator.NewUsecase(invRepo, concreteRt, models.llmClient, investigator.Config{
 				Enabled:            true,
 				MinSeverity:        firstNonEmpty(os.Getenv("ONGRID_INVESTIGATOR_MIN_SEVERITY"), "warning"),
@@ -106,7 +117,7 @@ func bootstrapAutomation(rootCtx context.Context, cfg *config.Config, log *slog.
 				AgentName:          "incident-investigator",
 				SummarizerModel:    sumModel,
 				SummarizerProvider: sumProvider,
-				SummarizerTimeout:  30 * time.Second,
+				SummarizerTimeout:  sumTimeout,
 				MaxConcurrent:      maxCC,
 				// Fall-back language for auto-fire + backfill (no request
 				// context, no Accept-Language). Manual triggers override per
