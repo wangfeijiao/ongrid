@@ -84,6 +84,8 @@ deploy-edge-batch/deploy-result-*.json
 deploy-edge-batch/probe-result.json
 deploy-edge-batch/probe-result.*.json
 deploy-edge-batch/.deploy*.log
+# Timestamped backups (e.g. credentials.json.bak-202610301028) must never be committed
+deploy-edge-batch/*.bak-*
 # Upgrade toolchain: staging packages, downloaded assets and run logs
 deploy-edge-batch/upgrade/pkg/
 deploy-edge-batch/upgrade/cache/
