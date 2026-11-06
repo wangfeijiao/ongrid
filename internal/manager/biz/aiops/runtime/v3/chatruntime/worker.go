@@ -260,6 +260,7 @@ func (rt *Runtime) SpawnWorker(ctx context.Context, req SpawnRequest) (*Worker, 
 		// coordinator. SendToWorker's runWorker callsite uses ctx as-is
 		// because SendTo inherits the coordinator's ctx directly.
 		workerCtx = basetool.WithLLMChoice(workerCtx, req.Provider, req.Model)
+		workerCtx = basetool.WithReasoningEffort(workerCtx, req.ReasoningEffort)
 		result, err := rt.runWorker(workerCtx, agentDef, sessID, req.Prompt, req.Locale, req.ParentEmit, id)
 
 		w.mu.Lock()
@@ -440,6 +441,7 @@ func (rt *Runtime) GetWorker(workerID string) (*Worker, bool) {
 // matching Handle()'s "user message lands on disk before the LLM call"
 // invariant — same survival semantics on a graph crash.
 func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userText, locale string, parentEmit Emit, workerID string) (result string, retErr error) {
+	ctx = basetool.WithSessionID(ctx, sessID)
 	session := &aiopsmodel.Session{ID: sessID}
 	if rt.cfg.Sessions != nil && sessID != "" {
 		var err error
@@ -968,6 +970,9 @@ func workerChatModelOpts(ctx context.Context) []model.Option {
 	}
 	if m := strings.TrimSpace(basetool.LLMModelFromContext(ctx)); m != "" {
 		opts = append(opts, model.WithModel(m))
+	}
+	if effort := basetool.ReasoningEffortFromContext(ctx); effort != "" {
+		opts = append(opts, llm.WithReasoningEffort(effort))
 	}
 	return opts
 }
