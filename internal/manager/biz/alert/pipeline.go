@@ -134,6 +134,11 @@ type PipelineEvaluator struct {
 	// tests is too).
 	firingSnapshot map[string]map[string]struct{}
 
+	// reconciledRules tracks rule keys whose persisted open incidents have
+	// been loaded into firingSnapshot at least once in this process. Same
+	// ownership as firingSnapshot (evaluatePromQuery only, single goroutine).
+	reconciledRules map[string]bool
+
 	log *slog.Logger
 	now func() time.Time
 }
@@ -153,21 +158,22 @@ func NewPipelineEvaluator(opts PipelineEvaluatorOpts) *PipelineEvaluator {
 		opts.Now = func() time.Time { return time.Now().UTC() }
 	}
 	return &PipelineEvaluator{
-		uc:             opts.Usecase,
-		rules:          opts.Rules,
-		notifier:       opts.Notifier,
-		resolver:       opts.Resolver,
-		inhibitor:      opts.Inhibitor,
-		channels:       append([]string(nil), opts.DefaultChannels...),
-		cooldown:       opts.Cooldown,
-		interval:       opts.Interval,
-		edges:          opts.EdgeLister,
-		prom:           opts.PromQuerier,
-		logq:           opts.LogQuerier,
-		logSearcher:    opts.LogSearcher,
-		deviceIdentity: opts.DeviceIdentityResolver,
-		log:            opts.Log,
-		now:            opts.Now,
+		uc:              opts.Usecase,
+		rules:           opts.Rules,
+		notifier:        opts.Notifier,
+		resolver:        opts.Resolver,
+		inhibitor:       opts.Inhibitor,
+		channels:        append([]string(nil), opts.DefaultChannels...),
+		cooldown:        opts.Cooldown,
+		interval:        opts.Interval,
+		edges:           opts.EdgeLister,
+		prom:            opts.PromQuerier,
+		logq:            opts.LogQuerier,
+		logSearcher:     opts.LogSearcher,
+		deviceIdentity:  opts.DeviceIdentityResolver,
+		reconciledRules: map[string]bool{},
+		log:             opts.Log,
+		now:             opts.Now,
 	}
 }
 
@@ -396,6 +402,20 @@ func (e *PipelineEvaluator) evaluatePromQuery(ctx context.Context, now time.Time
 		if e.firingSnapshot == nil {
 			e.firingSnapshot = map[string]map[string]struct{}{}
 		}
+		// Cold-start reconciliation: firingSnapshot is process-local, so
+		// incidents left open by a previous process (e.g. a manager
+		// restart) never appear in the sweep and stay open forever even
+		// after the condition clears. Seed them once per rule, after a
+		// successful Prom query, so the sweep below can resolve them.
+		if !e.reconciledRules[rule.RuleKey] {
+			if err := e.seedOpenIncidents(ctx, rule.RuleKey); err != nil {
+				e.log.Warn("alert: cold-start reconcile failed",
+					slog.String("rule", rule.RuleKey),
+					slog.Any("err", err))
+			} else {
+				e.reconciledRules[rule.RuleKey] = true
+			}
+		}
 		prev := e.firingSnapshot[rule.RuleKey]
 		for prevKey := range prev {
 			if _, stillFiring := fired[prevKey]; stillFiring {
@@ -412,6 +432,59 @@ func (e *PipelineEvaluator) evaluatePromQuery(ctx context.Context, now time.Time
 		done()
 		_ = evalErr
 	}
+}
+
+// seedOpenIncidents loads incidents that were left open by a previous
+// process (or before this rule was enabled) into the recovery snapshot,
+// so the existing sweep resolves them once the condition clears.
+//
+// Guards: only rows still status=open for this rule, and only
+// pipeline-owned dedupe keys. Rules that are no longer enabled never reach
+// evaluatePromQuery, so their incidents are left untouched. Reconciliation
+// runs once per rule per process, after that rule's Prom query succeeded —
+// a query failure leaves the snapshot untouched and retries next tick.
+// The DB read is paged and kept in a temporary set until every page is
+// read, so a partial failure cannot resolve anything with half the data.
+func (e *PipelineEvaluator) seedOpenIncidents(ctx context.Context, ruleKey string) error {
+	if e.uc == nil {
+		return nil
+	}
+	prefix := "pipeline:" + ruleKey + ":"
+	const pageSize = 500
+	seeded := make(map[string]struct{})
+	for offset := 0; ; offset += pageSize {
+		rows, err := e.uc.ListIncidents(ctx, IncidentFilter{
+			Status:  model.IncidentStatusOpen,
+			RuleKey: ruleKey,
+			Limit:   pageSize,
+			Offset:  offset,
+		})
+		if err != nil {
+			return fmt.Errorf("list open %q incidents: %w", ruleKey, err)
+		}
+		for _, inc := range rows {
+			if inc == nil || inc.Status != model.IncidentStatusOpen {
+				continue
+			}
+			if !strings.HasPrefix(inc.DedupeKey, prefix) {
+				continue
+			}
+			seeded[inc.DedupeKey] = struct{}{}
+		}
+		if len(rows) < pageSize {
+			break
+		}
+	}
+	if e.firingSnapshot == nil {
+		e.firingSnapshot = map[string]map[string]struct{}{}
+	}
+	if e.firingSnapshot[ruleKey] == nil {
+		e.firingSnapshot[ruleKey] = map[string]struct{}{}
+	}
+	for key := range seeded {
+		e.firingSnapshot[ruleKey][key] = struct{}{}
+	}
+	return nil
 }
 
 func (e *PipelineEvaluator) notify(ctx context.Context, res *FiringResult, summary, source string, at time.Time) {

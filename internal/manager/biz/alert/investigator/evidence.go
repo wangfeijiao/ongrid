@@ -236,6 +236,8 @@ func checkReference(ids []string, sources []alertmodel.EvidenceSource) alertmode
 	out := alertmodel.EvidenceReference{SourceIDs: []string{}, Status: "unverified"}
 	valid := 0
 	incomplete := false
+	hasUnsupported := false
+	unsupportedRefs := 0
 	if len(ids) > 16 {
 		out.Issues = append(out.Issues, "reference_limit")
 		ids = ids[:16]
@@ -256,7 +258,15 @@ func checkReference(ids []string, sources []alertmodel.EvidenceSource) alertmode
 			valid++
 		} else {
 			out.Issues = appendIssue(out.Issues, s.State+":"+id)
-			incomplete = incomplete || s.State == "unsupported" || s.State == "truncated" || s.State == "missing" || s.State == "pending"
+			// "unsupported" only means the tool's result shape is outside
+			// the structured-check whitelist: the observation exists, it
+			// just cannot be verified mechanically. It is not a missing or
+			// lost observation, so it must not make the check incomplete.
+			if s.State == "unsupported" {
+				hasUnsupported = true
+				unsupportedRefs++
+			}
+			incomplete = incomplete || s.State == "truncated" || s.State == "missing" || s.State == "pending"
 		}
 	}
 	if valid > 0 {
@@ -267,6 +277,20 @@ func checkReference(ids []string, sources []alertmodel.EvidenceSource) alertmode
 	}
 	if len(out.SourceIDs) == 0 {
 		out.Issues = appendIssue(out.Issues, "no_references")
+	}
+	// Keep an unsupported-only reference visible as "partial" rather than
+	// collapsing it into "unverified". Deliberately scoped to the
+	// unsupported state: fabricated IDs (unknown_source:*) and failed
+	// executions (error/timeout) must stay "unverified".
+	//
+	// The guard is structural: every cited source must be an unsupported
+	// observation and every issue must be exactly one "unsupported:<id>"
+	// per cited source. A mixed bag (unsupported + unknown_source / error /
+	// timeout) therefore stays "unverified" instead of being laundered into
+	// a partial pass (hotfix12).
+	if hasUnsupported && !incomplete && valid == 0 && len(out.SourceIDs) > 0 &&
+		unsupportedRefs == len(out.SourceIDs) && len(out.Issues) == unsupportedRefs {
+		out.Status = "partial"
 	}
 	if incomplete {
 		out.Status = "incomplete"

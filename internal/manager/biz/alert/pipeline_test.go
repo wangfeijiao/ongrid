@@ -352,3 +352,134 @@ func vectorUp(samples map[string]string) *promquery.InstantResult {
 	raw, _ := json.Marshal(entries)
 	return &promquery.InstantResult{ResultType: "vector", Result: raw}
 }
+
+func coldStartIncident(repo *fakeRepo, rule, dedupe string) *model.Incident {
+	repo.nextID++
+	inc := &model.Incident{
+		ID: repo.nextID, Rule: rule, Status: model.IncidentStatusOpen,
+		DedupeKey: dedupe, Severity: "critical",
+	}
+	repo.incidents[inc.ID] = inc
+	repo.byDedupe[inc.DedupeKey] = inc
+	return inc
+}
+
+func coldStartVector(labels ...map[string]string) *promquery.InstantResult {
+	type vEntry struct {
+		Metric map[string]string `json:"metric"`
+		Value  []json.RawMessage `json:"value"`
+	}
+	entries := make([]vEntry, 0, len(labels))
+	for _, m := range labels {
+		entries = append(entries, vEntry{
+			Metric: m,
+			Value:  []json.RawMessage{json.RawMessage("1"), json.RawMessage(`"120"`)},
+		})
+	}
+	raw, _ := json.Marshal(entries)
+	return &promquery.InstantResult{ResultType: "vector", Result: raw}
+}
+
+func coldStartRules() RulesProvider {
+	return NewStaticRulesProvider(WithMetricRawRules([]MetricRawRule{
+		{ID: 1, RuleKey: "device_offline", Name: "设备离线", Severity: "critical",
+			Expr: "device_last_seen_seconds_ago > 90"},
+	}))
+}
+
+// A manager restart discards firingSnapshot. Open incidents left by the
+// previous process must still be resolved once the condition clears.
+func TestPipelineColdStartResolvesOrphanedOpenIncident(t *testing.T) {
+	repo := newFakeRepo()
+	labels := map[string]string{"device_id": "13", "device_name": "srv-10-7-30-34"}
+	inc := coldStartIncident(repo, "device_offline", "pipeline:device_offline:"+labelSetKey(labels))
+	prom := &fakePromQuerier{result: coldStartVector()}
+	eval := newPipelineEvaluator(t, repo, &fakeNotifier{}, coldStartRules(), PipelineEvaluatorOpts{PromQuerier: prom})
+
+	eval.EvaluateOnce(t.Context())
+
+	if inc.Status != model.IncidentStatusResolved {
+		t.Fatalf("orphaned incident status = %q, want resolved", inc.Status)
+	}
+	found := false
+	for _, ev := range repo.events {
+		if ev.EventType == model.EventTypeResolved && ev.ActorType == model.ActorTypeSystem {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("missing system resolve audit event")
+	}
+}
+
+// Seeding must not close an incident whose condition still matches.
+func TestPipelineColdStartKeepsStillFiringIncident(t *testing.T) {
+	repo := newFakeRepo()
+	labels := map[string]string{"device_id": "13", "device_name": "srv-10-7-30-34"}
+	inc := coldStartIncident(repo, "device_offline", "pipeline:device_offline:"+labelSetKey(labels))
+	prom := &fakePromQuerier{result: coldStartVector(labels)}
+	eval := newPipelineEvaluator(t, repo, &fakeNotifier{}, coldStartRules(), PipelineEvaluatorOpts{PromQuerier: prom})
+
+	eval.EvaluateOnce(t.Context())
+
+	if inc.Status != model.IncidentStatusOpen {
+		t.Fatalf("still-firing incident status = %q, want open", inc.Status)
+	}
+}
+
+// Incidents from other rules, or owned by a non-pipeline evaluator, are
+// out of scope for this reconciliation.
+func TestPipelineColdStartIgnoresForeignIncidents(t *testing.T) {
+	repo := newFakeRepo()
+	otherRule := coldStartIncident(repo, "log_volume_spike", "pipeline:log_volume_spike:job=x")
+	foreignOwner := coldStartIncident(repo, "device_offline", "host:13:edge_offline")
+	prom := &fakePromQuerier{result: coldStartVector()}
+	eval := newPipelineEvaluator(t, repo, &fakeNotifier{}, coldStartRules(), PipelineEvaluatorOpts{PromQuerier: prom})
+
+	eval.EvaluateOnce(t.Context())
+
+	if otherRule.Status != model.IncidentStatusOpen || foreignOwner.Status != model.IncidentStatusOpen {
+		t.Fatalf("foreign incidents resolved: other rule=%q, foreign owner=%q", otherRule.Status, foreignOwner.Status)
+	}
+}
+
+// A failed Prom query defers reconciliation; nothing is resolved until
+// the next successful tick.
+func TestPipelineColdStartDefersOnPromFailure(t *testing.T) {
+	repo := newFakeRepo()
+	inc := coldStartIncident(repo, "device_offline", "pipeline:device_offline:device_id=13")
+	prom := &fakePromQuerier{err: errors.New("prom unavailable")}
+	eval := newPipelineEvaluator(t, repo, &fakeNotifier{}, coldStartRules(), PipelineEvaluatorOpts{PromQuerier: prom})
+
+	eval.EvaluateOnce(t.Context())
+	if inc.Status != model.IncidentStatusOpen {
+		t.Fatalf("resolved during failed query: %q", inc.Status)
+	}
+
+	prom.err = nil
+	prom.result = coldStartVector()
+	eval.EvaluateOnce(t.Context())
+	if inc.Status != model.IncidentStatusResolved {
+		t.Fatalf("not resolved after recovery: %q", inc.Status)
+	}
+}
+
+// A failed DB read must leave the snapshot untouched and retry next tick.
+func TestPipelineColdStartRetriesAfterRepoFailure(t *testing.T) {
+	repo := newFakeRepo()
+	inc := coldStartIncident(repo, "device_offline", "pipeline:device_offline:device_id=13")
+	repo.listIncidentsErr = errors.New("db unavailable")
+	prom := &fakePromQuerier{result: coldStartVector()}
+	eval := newPipelineEvaluator(t, repo, &fakeNotifier{}, coldStartRules(), PipelineEvaluatorOpts{PromQuerier: prom})
+
+	eval.EvaluateOnce(t.Context())
+	if inc.Status != model.IncidentStatusOpen {
+		t.Fatalf("resolved with failed DB read: %q", inc.Status)
+	}
+
+	repo.listIncidentsErr = nil
+	eval.EvaluateOnce(t.Context())
+	if inc.Status != model.IncidentStatusResolved {
+		t.Fatalf("not resolved after DB recovered: %q", inc.Status)
+	}
+}
