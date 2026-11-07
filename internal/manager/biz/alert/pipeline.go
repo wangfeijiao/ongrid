@@ -491,76 +491,19 @@ func (e *PipelineEvaluator) notify(ctx context.Context, res *FiringResult, summa
 	if res == nil || res.Incident == nil {
 		return
 	}
-	incident := res.Incident
-
-	// Decode the incident labels once. They carry both the application
-	// identity used for routing/correlation and the technical identity
-	// (device_id, target_name, kind, plugin, ...) the readable "对象" line
-	// is built from. A malformed blob degrades to an empty label set —
-	// never to a dropped notification.
-	labels, err := incident.Labels()
-	if err != nil {
-		e.log.Warn("alert: decode notification identity failed",
-			slog.Uint64("incident_id", incident.ID), slog.Any("err", err))
-		labels = model.Labels{}
-	}
-
-	// Resolve the device for display only. Host-scope rules already set
-	// incident.device_id; monitoring_pipeline rules (e.g. scrape_down) keep
-	// device_id in the metric labels instead, so fall back to those. Dedupe
-	// keys, incident ownership, inhibition and recovery are not touched.
-	var deviceID uint64
-	if incident.DeviceID != nil && *incident.DeviceID > 0 {
-		deviceID = *incident.DeviceID
-	} else if parsed := deviceIDFromLabels(labels); parsed != nil {
-		deviceID = *parsed
-	}
-	identity, display, host := DeviceIdentity{}, "", ""
-	if deviceID > 0 && e.deviceIdentity != nil {
-		resolved, resolveErr := e.deviceIdentity(ctx, deviceID)
-		if resolveErr != nil {
-			e.log.Warn("alert: resolve device identity for notification failed",
-				slog.Uint64("device_id", deviceID), slog.Any("err", resolveErr))
-		} else {
-			identity = resolved
-			display = deviceDisplay(resolved)
-			host = readableDevice(resolved)
-		}
-	}
-
-	msg := notify.Message{
-		Subject:    readableTitle(incident.Rule, incident.RuleName),
-		Body:       readableBody(labels, incident.Rule, host, readableDetail(summary, deviceID, display)),
-		Severity:   notify.Severity(incident.Severity),
-		Source:     source,
-		DedupeKey:  incident.DedupeKey,
-		OccurredAt: at,
-		Labels: map[string]string{
-			"rule":        incident.Rule,
-			"incident_id": fmt.Sprintf("%d", incident.ID),
-		},
-	}
-	// Preserve application identity for notification routing and correlation.
-	// Control labels such as incident_id/rule still come from the incident.
-	for _, key := range []string{"service", "service_namespace", "deployment_environment_name", "service_instance_id", "span_name"} {
-		if value, ok := labels[key]; ok {
-			msg.Labels[key] = value
-		}
-	}
-	if deviceID > 0 {
-		msg.Labels["device_id"] = fmt.Sprintf("%d", deviceID)
-		if display != "" {
-			if identity.Hostname != "" {
-				msg.Labels["device_hostname"] = identity.Hostname
-			}
-			if identity.IPAddress != "" {
-				msg.Labels["device_ip"] = identity.IPAddress
-			}
-		}
-	}
-	if msg.Severity == "" {
-		msg.Severity = notify.SeverityWarning
-	}
+	// Decode labels + resolve the device for display, then render the shared
+	// readable message. Both steps are best-effort and never drop the
+	// notification; dedupe keys, incident ownership, inhibition and recovery
+	// are untouched. The same renderer runs on the retry path
+	// (buildIncidentMessage), so the two cannot drift.
+	dev := resolveIncidentDevice(ctx, res.Incident, e.deviceIdentity, e.log)
+	msg := renderIncidentMessage(notificationRender{
+		Incident: res.Incident,
+		Summary:  summary,
+		Source:   source,
+		At:       at,
+		Device:   dev,
+	})
 	e.uc.MaybeNotify(ctx, res, msg, NotifyOpts{
 		Notifier:        e.notifier,
 		Resolver:        e.resolver,

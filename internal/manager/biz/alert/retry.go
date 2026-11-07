@@ -200,34 +200,30 @@ func (w *RetryWorker) retryOne(ctx context.Context, d *model.Delivery, now time.
 	}
 }
 
+// buildIncidentMessage rebuilds the outbound notify.Message from persisted
+// incident state for a retry attempt. It runs through the same renderer as
+// the first-attempt path (renderIncidentMessage) so a retried delivery reads
+// identically to the original — Chinese title, 对象/说明/详情 body — instead of
+// regressing to the raw technical summary.
+//
+// The retry worker wires no DeviceIdentityResolver, so the device stays as
+// the raw device_id in the 详情 line (graceful degradation; no 主机 shown).
 func buildIncidentMessage(incident *model.Incident, now time.Time) notify.Message {
-	severity := notify.Severity(incident.Severity)
-	if severity == "" {
-		severity = notify.SeverityWarning
-	}
-	labels := map[string]string{
-		"rule":        incident.Rule,
-		"incident_id": fmt.Sprintf("%d", incident.ID),
-	}
-	if incident.DeviceID != nil {
-		labels["device_id"] = fmt.Sprintf("%d", *incident.DeviceID)
-	}
-	subject := incident.Summary
-	if subject == "" {
-		subject = incident.Title
+	summary := incident.Summary
+	if summary == "" {
+		summary = incident.Title
 	}
 	occurredAt := incident.LastFiredAt
 	if occurredAt.IsZero() {
 		occurredAt = now
 	}
-	return notify.Message{
-		Subject:    subject,
-		Severity:   severity,
-		Source:     incident.ScopeType,
-		DedupeKey:  incident.DedupeKey,
-		OccurredAt: occurredAt,
-		Labels:     labels,
-	}
+	return renderIncidentMessage(notificationRender{
+		Incident: incident,
+		Summary:  summary,
+		Source:   incident.ScopeType,
+		At:       occurredAt,
+		Device:   resolveIncidentDevice(context.Background(), incident, nil, nil),
+	})
 }
 
 func ptrString(s string) *string { return &s }
