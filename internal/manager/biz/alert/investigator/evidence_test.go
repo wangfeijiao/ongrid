@@ -136,11 +136,22 @@ func TestEvidenceExtractionCannotLaunderCitationsThroughNarrative(t *testing.T) 
 }
 
 func TestEvidenceReadAndPromptLimitsRemainExplicit(t *testing.T) {
-	for _, state := range []string{"unsupported", "truncated", "pending", "missing"} {
+	// A lost / unfinished observation is genuinely incomplete.
+	for _, state := range []string{"truncated", "pending", "missing"} {
 		ref := checkReference([]string{"E1"}, []alertmodel.EvidenceSource{{ID: "E1", State: state}})
 		if ref.Status != "incomplete" {
 			t.Fatalf("%s must remain incomplete: %+v", state, ref)
 		}
+	}
+	// "unsupported" means the result shape is outside the structured
+	// checker's whitelist, not that the observation was lost. It stays
+	// visible as "partial" with its issue retained.
+	unsupported := checkReference([]string{"E1"}, []alertmodel.EvidenceSource{{ID: "E1", State: "unsupported"}})
+	if unsupported.Status != "partial" {
+		t.Fatalf("unsupported must be partial: %+v", unsupported)
+	}
+	if !strings.Contains(strings.Join(unsupported.Issues, ","), "unsupported:E1") {
+		t.Fatalf("unsupported issue must remain visible: %+v", unsupported.Issues)
 	}
 	for _, tt := range []struct {
 		name   string
@@ -169,6 +180,38 @@ func TestEvidenceReadAndPromptLimitsRemainExplicit(t *testing.T) {
 		if !json.Valid([]byte(line)) {
 			t.Fatal("bounded prompt broke JSON")
 		}
+	}
+}
+
+// TestEvidenceUnsupportedReferenceKeepsProvenanceVisible covers the new
+// semantics: unsupported alone is partial, unsupported mixed with a valid
+// source stays partial, and a genuinely lost observation still wins.
+func TestEvidenceUnsupportedReferenceKeepsProvenanceVisible(t *testing.T) {
+	sources := []alertmodel.EvidenceSource{
+		{ID: "E1", State: "available"},
+		{ID: "E2", State: "unsupported"},
+		{ID: "E3", State: "truncated"},
+	}
+	for _, tt := range []struct {
+		name string
+		refs []string
+		want string
+	}{
+		{"unsupported only", []string{"E2"}, "partial"},
+		{"valid plus unsupported", []string{"E1", "E2"}, "partial"},
+		{"unsupported plus truncated", []string{"E2", "E3"}, "incomplete"},
+		{"fabricated id", []string{"E99"}, "unverified"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := checkReference(tt.refs, sources)
+			if got.Status != tt.want {
+				t.Fatalf("status=%s want %s: %+v", got.Status, tt.want, got)
+			}
+		})
+	}
+	ref := checkReference([]string{"E2"}, sources)
+	if !strings.Contains(strings.Join(ref.Issues, ","), "unsupported:E2") {
+		t.Fatalf("issue was dropped: %+v", ref.Issues)
 	}
 }
 
@@ -287,5 +330,74 @@ func TestEvidenceDetailOmitsClippedErrorCopy(t *testing.T) {
 		if strings.Contains(set.Prompt+detail.Result+detail.Error, "dummy-sensitive-value") || !strings.Contains(detail.Error, "omitted") {
 			t.Fatalf("clipped error copy was not safely omitted for result size %d", size)
 		}
+	}
+}
+
+// TestCheckReferenceUnsupportedMixedWithFabricatedStaysUnverified is the
+// hotfix12 gate regression: an unsupported reference mixed with a
+// fabricated ID must stay "unverified", not be laundered into "partial".
+func TestCheckReferenceUnsupportedMixedWithFabricatedStaysUnverified(t *testing.T) {
+	sources := []alertmodel.EvidenceSource{{ID: "E2", State: "unsupported"}}
+	for _, tt := range []struct {
+		name string
+		refs []string
+	}{
+		{"unsupported + fabricated id", []string{"E2", "E99"}},
+		{"fabricated id + unsupported", []string{"E99", "E2"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := checkReference(tt.refs, sources)
+			if got.Status != "unverified" {
+				t.Fatalf("status=%s want unverified: %+v", got.Status, got)
+			}
+			joined := strings.Join(got.Issues, ",")
+			for _, want := range []string{"unsupported:E2", "unknown_source:E99"} {
+				if !strings.Contains(joined, want) {
+					t.Fatalf("issue %q was dropped: %v", want, got.Issues)
+				}
+			}
+		})
+	}
+}
+
+// TestCheckReferenceUnsupportedMixedWithFailedExecutionStaysUnverified
+// covers the second half of the gate: an unsupported reference mixed with
+// a failed execution (error / timeout) must stay "unverified". The failed
+// sources MUST use error/timeout, never truncated/missing/pending, because
+// those set incomplete=true and would mask the gate via a different path.
+func TestCheckReferenceUnsupportedMixedWithFailedExecutionStaysUnverified(t *testing.T) {
+	for _, failedState := range []string{"error", "timeout"} {
+		t.Run("unsupported+"+failedState, func(t *testing.T) {
+			sources := []alertmodel.EvidenceSource{
+				{ID: "E2", State: "unsupported"},
+				{ID: "E3", State: failedState},
+			}
+			got := checkReference([]string{"E2", "E3"}, sources)
+			if got.Status != "unverified" {
+				t.Fatalf("status=%s want unverified: %+v", got.Status, got)
+			}
+			joined := strings.Join(got.Issues, ",")
+			for _, want := range []string{"unsupported:E2", failedState + ":E3"} {
+				if !strings.Contains(joined, want) {
+					t.Fatalf("issue %q was dropped: %v", want, got.Issues)
+				}
+			}
+		})
+	}
+}
+
+// TestCheckReferenceUnsupportedOnlyStillPartial pins that the gate did not
+// over-tighten: an all-unsupported reference set is still "partial".
+func TestCheckReferenceUnsupportedOnlyStillPartial(t *testing.T) {
+	sources := []alertmodel.EvidenceSource{
+		{ID: "E1", State: "unsupported"},
+		{ID: "E2", State: "unsupported"},
+	}
+	got := checkReference([]string{"E1", "E2"}, sources)
+	if got.Status != "partial" {
+		t.Fatalf("status=%s want partial: %+v", got.Status, got)
+	}
+	if len(got.Issues) != 2 {
+		t.Fatalf("issues=%v want 2 unsupported issues", got.Issues)
 	}
 }

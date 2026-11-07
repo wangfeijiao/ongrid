@@ -146,7 +146,7 @@ type Config struct {
 	// provider (e.g. "zhipu" for GLM-4-air). Empty → router default.
 	SummarizerProvider string
 
-	// SummarizerTimeout bounds the extraction LLM call. Default 30s
+	// SummarizerTimeout bounds the extraction LLM call. Default 120s
 	// — short prompt, short reply, no tool loop.
 	SummarizerTimeout time.Duration
 
@@ -709,6 +709,8 @@ func renderAlertPrompt(in *alertmodel.Incident, locale string) string {
 	b.WriteString(fmt.Sprintf("  severity: %s\n", in.Severity))
 	b.WriteString(fmt.Sprintf("  first_fired_at: %s\n", in.FirstFiredAt.UTC().Format(time.RFC3339)))
 	b.WriteString(fmt.Sprintf("  last_fired_at: %s\n", in.LastFiredAt.UTC().Format(time.RFC3339)))
+	b.WriteString(fmt.Sprintf("  investigation_window: %s .. %s\n", in.FirstFiredAt.UTC().Format(time.RFC3339), in.LastFiredAt.UTC().Format(time.RFC3339)))
+	b.WriteString("Every log / metric / event query MUST set both start and end so they cover the investigation_window above, especially its end (last_fired_at). Do not rely on the default now-1h window and do not pass end without start. If you widen the window, keep last_fired_at inside it. Observations outside this window are stale and cannot support a root-cause conclusion.\n")
 	if in.DeviceID != nil {
 		b.WriteString(fmt.Sprintf("  device_id: %d\n", *in.DeviceID))
 	}

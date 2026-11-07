@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -31,6 +33,19 @@ type extractedReport struct {
 	Suggested        []map[string]any                   `json:"suggested_actions,omitempty"`
 	Confidence       *float64                           `json:"confidence,omitempty"`
 }
+
+const (
+	// observationWindowTolerance absorbs clock skew between alert ingestion
+	// and telemetry timestamps, and lets a worker widen its queries slightly
+	// without being flagged as stale evidence.
+	observationWindowTolerance = 15 * time.Minute
+	// lowCoverageThreshold is the minimum fraction of the investigation
+	// window that timestamped observations must cover (as a union).
+	lowCoverageThreshold = 0.10
+	// Freshness penalties applied to the model's self-reported confidence.
+	staleObservationPenalty = 0.70
+	lowCoveragePenalty      = 0.85
+)
 
 // extractStructured reuses the existing extraction call and checks references
 // against persisted observations. Failure preserves the narrative, not a guessed root cause.
@@ -118,10 +133,29 @@ func (uc *Usecase) extractStructured(ctx context.Context, incident alertmodel.In
 	out.PinpointedTargetJSON = marshalOrDefault(ex.PinpointTarget, "{}")
 	check := alertmodel.EvidenceCheck{Version: 1, RootCause: checkReference(ex.RootCauseSources, sources.Sources), Sources: sources.Sources, Issues: sources.Issues}
 	check.Status = check.RootCause.Status
+	// Post-hoc guard against a worker that queried only now-1h while the
+	// incident fired hours earlier: compare the observation timestamps that
+	// actually came back with the investigation window.
+	//
+	// evaluatedAt is an audit label for when this coverage assessment ran.
+	// It is deliberately NOT used to derive the judgment window:
+	// window_start_used / window_end_used are frozen from the incident
+	// snapshot (FirstFiredAt / LastFiredAt) passed into extractStructured.
+	// For a continuously firing alert, last_fired_at keeps moving forward;
+	// a report that has already been generated is never recomputed against
+	// the widened window, and assessObservationCoverage performs no DB read.
+	coverageIssues, coverageFactors := assessObservationCoverage(incident, sources, time.Now().UTC())
+	for _, issue := range coverageIssues {
+		check.Issues = appendIssue(check.Issues, issue)
+	}
 	if len(ex.Evidence) > 32 {
 		check.Issues = appendIssue(check.Issues, "reference_limit")
 		ex.Evidence = ex.Evidence[:32]
 	}
+	stepIncomplete := false
+	incompleteSteps := 0
+	incompleteStepSourceIDs := make([]string, 0)
+	seenIncompleteSourceID := make(map[string]struct{})
 	for i := range ex.Evidence {
 		e := &ex.Evidence[i]
 		e.EvidenceReference = checkReference(e.SourceIDs, sources.Sources)
@@ -139,14 +173,49 @@ func (uc *Usecase) extractStructured(ctx context.Context, incident alertmodel.In
 			}
 		}
 		if e.Status == "incomplete" {
-			check.Status = "incomplete"
+			// hotfix13: an intermediate step citing a truncated / missing /
+			// pending source is recorded for audit but must NOT collapse the
+			// whole check on its own. Count it so a report where EVERY step
+			// is a broken reference can still be flagged genuinely incomplete.
+			stepIncomplete = true
+			incompleteSteps++
+			for _, id := range e.SourceIDs {
+				if _, ok := seenIncompleteSourceID[id]; ok {
+					continue
+				}
+				seenIncompleteSourceID[id] = struct{}{}
+				incompleteStepSourceIDs = append(incompleteStepSourceIDs, id)
+			}
 		} else if e.Status != "traceable" && check.Status == "traceable" {
 			check.Status = "partial"
 		}
 	}
-	if len(check.Issues) > 0 {
+	blocking, quality := classifyCheckIssues(check.Issues)
+	// A report whose every evidence step is a broken reference has no
+	// verifiable provenance at all, even when the root-cause reference itself
+	// happens to be traceable. Keep that case genuinely incomplete instead of
+	// laundering it into "partial" (hotfix13 QA guard).
+	allStepsIncomplete := len(ex.Evidence) > 0 && incompleteSteps == len(ex.Evidence)
+	if blocking || check.RootCause.Status == "incomplete" || allStepsIncomplete {
 		check.Status = "incomplete"
+	} else if (quality || stepIncomplete) && check.Status != "incomplete" {
+		// Data-quality issues and an intermediate step citing a truncated
+		// source downgrade to "partial". "Genuinely incomplete" now means a
+		// blocking issue, an incomplete root-cause reference, or a fully
+		// broken evidence set - not any single intermediate step (hotfix13).
+		check.Status = "partial"
 	}
+	// Step-level reasons live only in confidence_factors. They must never be
+	// appended to check.Issues: classifyCheckIssues treats unknown codes as
+	// blocking, which would pull the verdict back to incomplete.
+	incompleteStepRatio := float64(0)
+	if len(ex.Evidence) > 0 {
+		incompleteStepRatio = float64(incompleteSteps) / float64(len(ex.Evidence))
+	}
+	coverageFactors["step_reference_incomplete"] = stepIncomplete
+	coverageFactors["incomplete_step_source_ids"] = incompleteStepSourceIDs
+	coverageFactors["incomplete_step_count"] = incompleteSteps
+	coverageFactors["incomplete_step_ratio"] = incompleteStepRatio
 	checkedJSON := marshalOrDefault(check, "{}")
 	out.EvidenceCheckJSON = &checkedJSON
 	out.EvidenceJSON = marshalOrDefault(ex.Evidence, "[]")
@@ -170,8 +239,299 @@ func (uc *Usecase) extractStructured(ctx context.Context, incident alertmodel.In
 		}
 		out.Confidence = &c
 	}
-	out.ConfidenceFactorsJSON = buildConfidenceFactors(ex, toolCallCount)
+	// Freshness downgrade: stale observations cost more than thin coverage;
+	// when both apply we keep the smaller multiplier (the stricter penalty).
+	freshnessPenalty := 1.0
+	if stale, _ := coverageFactors["stale_observation"].(bool); stale {
+		freshnessPenalty = math.Min(freshnessPenalty, staleObservationPenalty)
+	}
+	if low, _ := coverageFactors["low_coverage"].(bool); low {
+		freshnessPenalty = math.Min(freshnessPenalty, lowCoveragePenalty)
+	}
+	coverageFactors["freshness_penalty"] = freshnessPenalty
+	if out.Confidence != nil && freshnessPenalty < 1.0 {
+		adjusted := *out.Confidence * freshnessPenalty
+		out.Confidence = &adjusted
+	}
+	out.ConfidenceFactorsJSON = buildConfidenceFactors(ex, toolCallCount, coverageFactors)
 	return out
+}
+
+// classifyCheckIssues splits evidence-check issues into blocking (the check
+// itself could not be completed), quality (observations exist but their
+// freshness/coverage is weak) and informational (bounded prompt/preview).
+// Prefix issues such as "unknown_source:E9" are matched on the part before
+// ':' so they can never be mistaken for an informational code. Unknown codes
+// keep the conservative legacy behaviour and block a complete check.
+func classifyCheckIssues(issues []string) (blocking bool, quality bool) {
+	for _, issue := range issues {
+		code := issue
+		if i := strings.IndexByte(code, ':'); i >= 0 {
+			code = code[:i]
+		}
+		switch code {
+		case "source_reader_unavailable", "source_read_failed", "source_incomplete",
+			"source_limit", "extraction_unavailable":
+			blocking = true
+		case "stale_observation", "low_coverage":
+			quality = true
+		case "preview_truncated", "prompt_limit", "reference_limit":
+			// Informational: keep the issue visible, but do not change status.
+		default:
+			blocking = true
+		}
+	}
+	return blocking, quality
+}
+
+// observationSourceDetail is the per-source audit row persisted into
+// confidence_factors. It records exactly how each source was classified and
+// clipped, so coverage_ratio can be recomputed using ONLY the fields stored
+// in the report — without consulting alert_incidents.last_fired_at or any
+// runtime state. No raw result content is stored here.
+type observationSourceDetail struct {
+	ID                   string `json:"id"`
+	Tool                 string `json:"tool"`
+	DataStart            string `json:"data_start"`
+	DataEnd              string `json:"data_end"`
+	IsLogClass           bool   `json:"is_log_class"`
+	IsStale              bool   `json:"is_stale"`
+	ClippedStart         string `json:"clipped_start"`
+	ClippedEnd           string `json:"clipped_end"`
+	CountedInLogCoverage bool   `json:"counted_in_log_coverage"`
+}
+
+// logObservationToolNames is the wire-tool allowlist whose timestamped
+// results count as log / event observations for the coverage assessment.
+// Verified against internal/manager/biz/aiops/tools/registry.go ToolName*
+// constants: query_logql, query_change_events, query_incidents,
+// query_traceql and query_k8s_logs are real wire names in this build;
+// query_logs and query_logql_compact are kept as defensive aliases for
+// older releases. Everything else — most importantly query_promql with its
+// multi-day lookbacks — is a metric / other source and is deliberately
+// excluded from the log coverage union, so a wide PromQL range can no
+// longer mask a 143-second stale log query.
+var logObservationToolNames = map[string]struct{}{
+	"query_logql":         {},
+	"query_logs":          {},
+	"query_logql_compact": {},
+	"query_change_events": {},
+	"query_incidents":     {},
+	"query_traceql":       {},
+	"query_k8s_logs":      {},
+}
+
+// isLogClassObservation reports whether a wire tool yields log / event
+// observations. Unknown tools are conservatively grouped with metrics:
+// they still count in observation_sources but never in the log coverage
+// union, so an unrecognised tool can only lower coverage, never inflate it.
+func isLogClassObservation(tool string) bool {
+	_, ok := logObservationToolNames[tool]
+	return ok
+}
+
+// assessObservationCoverage compares the timestamps actually returned by
+// observations with the incident's investigation window.
+//
+// The judgment window is a GENERATION-TIME SNAPSHOT: windowStart / windowEnd
+// are derived once from incident.FirstFiredAt / incident.LastFiredAt as
+// passed into extractStructured by the calling investigation. This function
+// never queries the database, never reads time.Now() inside itself, and
+// never re-fetches the alert's live firing state. For a continuously firing
+// alert last_fired_at keeps moving forward, but this report's verdict is
+// frozen at the window captured when the report was generated and is NOT
+// recomputed as later firings widen the window. Under sustained firing the
+// tail-freshness rule ("some log observation must reach the window end")
+// will almost always fail — that is intended behaviour, not a false
+// positive: it means the evidence genuinely did not keep up with the alert.
+//
+// evaluatedAt is a pure audit label (RFC3339Nano). window_start_used,
+// window_end_used and the per-source observation_details are persisted so a
+// reviewer can reproduce coverage_ratio from the report alone.
+//
+// Only log / event class sources count toward coverage_ratio. Metric
+// sources (query_promql and friends) are counted separately in
+// metric_observation_sources but never in the log coverage union.
+func assessObservationCoverage(incident alertmodel.Incident, sources evidenceSet, evaluatedAt time.Time) ([]string, map[string]any) {
+	windowStart := incident.FirstFiredAt.Add(-observationWindowTolerance)
+	windowEnd := incident.LastFiredAt.Add(observationWindowTolerance)
+	window := windowEnd.Sub(windowStart)
+
+	// The tail tolerance grows with the window (5%) but never shrinks below
+	// the fixed clock-skew tolerance, so short incidents are not judged by
+	// an unrealistically tight band and long ones still require coverage
+	// near their own end rather than several days earlier.
+	endTolerance := observationWindowTolerance
+	if window > 0 {
+		if scaled := time.Duration(float64(window) * 0.05); scaled > endTolerance {
+			endTolerance = scaled
+		}
+	}
+
+	factors := map[string]any{
+		"observation_coverage":       false,
+		"stale_observation":          false,
+		"low_coverage":               false,
+		"coverage_ratio":             float64(0),
+		"observation_sources":        0,
+		"log_observation_sources":    0,
+		"metric_observation_sources": 0,
+		"last_log_end_gap_seconds":   float64(0),
+		"window_start_used":          windowStart.UTC().Format(time.RFC3339Nano),
+		"window_end_used":            windowEnd.UTC().Format(time.RFC3339Nano),
+		"evaluated_at":               evaluatedAt.UTC().Format(time.RFC3339Nano),
+		"observation_details":        []observationSourceDetail{},
+	}
+	issues := make([]string, 0, 2)
+	// With no sources at all (or a degenerate window) the assessment is not
+	// applicable; the reference check already reports no_references / reader
+	// failures. This also keeps reports with no observation sources from
+	// being penalised.
+	if len(sources.Sources) == 0 || window <= 0 {
+		return issues, factors
+	}
+
+	type interval struct{ start, end time.Time }
+	logIntervals := make([]interval, 0, len(sources.Sources))
+	details := make([]observationSourceDetail, 0, len(sources.Sources))
+	usable := 0
+	logUsable := 0
+	metricUsable := 0
+	whollyOutside := false
+	var latestLogEnd time.Time // max min(DataEnd, windowEnd) over log-class sources
+
+	for _, s := range sources.Sources {
+		isLog := isLogClassObservation(s.Tool)
+		d := observationSourceDetail{
+			ID:         s.ID,
+			Tool:       s.Tool,
+			DataStart:  s.DataStart,
+			DataEnd:    s.DataEnd,
+			IsLogClass: isLog,
+		}
+		if s.State != "available" || s.DataStart == "" || s.DataEnd == "" {
+			details = append(details, d)
+			continue
+		}
+		start, errStart := time.Parse(time.RFC3339Nano, s.DataStart)
+		end, errEnd := time.Parse(time.RFC3339Nano, s.DataEnd)
+		if errStart != nil || errEnd != nil || end.Before(start) {
+			details = append(details, d)
+			continue
+		}
+		usable++
+		if isLog {
+			logUsable++
+		} else {
+			metricUsable++
+		}
+
+		// A source entirely outside the window is stale regardless of class
+		// (always recorded on the audit row), but only log / event sources
+		// can make the overall log-freshness verdict stale (hotfix13).
+		d.IsStale = end.Before(windowStart) || start.After(windowEnd)
+		if isLog && d.IsStale {
+			whollyOutside = true
+		}
+
+		clippedStart := start
+		clippedEnd := end
+		if clippedStart.Before(windowStart) {
+			clippedStart = windowStart
+		}
+		if clippedEnd.After(windowEnd) {
+			clippedEnd = windowEnd
+		}
+		// A source entirely before the window has no in-window span; collapse it
+		// to an empty interval at the boundary instead of an inverted one.
+		// Zero length keeps clippedEnd.After(clippedStart) false, so the row
+		// never enters the coverage union and coverage_ratio is unchanged.
+		if clippedEnd.Before(clippedStart) {
+			clippedEnd = clippedStart
+		}
+		d.ClippedStart = clippedStart.UTC().Format(time.RFC3339Nano)
+		d.ClippedEnd = clippedEnd.UTC().Format(time.RFC3339Nano)
+
+		// Track the newest log observation (clipped only at windowEnd, so a
+		// wholly-early source still reports a large, honest tail gap).
+		if isLog {
+			rawEnd := end
+			if rawEnd.After(windowEnd) {
+				rawEnd = windowEnd
+			}
+			if latestLogEnd.IsZero() || rawEnd.After(latestLogEnd) {
+				latestLogEnd = rawEnd
+			}
+		}
+
+		// Only log / event observations that actually overlap the window
+		// contribute to the coverage union.
+		if isLog && !d.IsStale && clippedEnd.After(clippedStart) {
+			d.CountedInLogCoverage = true
+			logIntervals = append(logIntervals, interval{start: clippedStart, end: clippedEnd})
+		}
+		details = append(details, d)
+	}
+
+	ratio := float64(0)
+	if len(logIntervals) > 0 {
+		sort.Slice(logIntervals, func(i, j int) bool {
+			if logIntervals[i].start.Equal(logIntervals[j].start) {
+				return logIntervals[i].end.Before(logIntervals[j].end)
+			}
+			return logIntervals[i].start.Before(logIntervals[j].start)
+		})
+		covered := time.Duration(0)
+		curStart, curEnd := logIntervals[0].start, logIntervals[0].end
+		for _, iv := range logIntervals[1:] {
+			if iv.start.After(curEnd) {
+				covered += curEnd.Sub(curStart)
+				curStart, curEnd = iv.start, iv.end
+			} else if iv.end.After(curEnd) {
+				curEnd = iv.end
+			}
+		}
+		covered += curEnd.Sub(curStart)
+		ratio = covered.Seconds() / window.Seconds()
+		if ratio > 1 {
+			ratio = 1
+		}
+	}
+
+	// Tail freshness: with at least one log-class observation, the newest
+	// one must reach windowEnd - endTolerance. With none we cannot judge
+	// log freshness, so the end-proximity rule is skipped and the emptiness
+	// surfaces as low_coverage (ratio 0) instead.
+	tailStale := false
+	if logUsable > 0 {
+		gap := windowEnd.Sub(latestLogEnd)
+		if gap < 0 {
+			gap = 0
+		}
+		factors["last_log_end_gap_seconds"] = gap.Seconds()
+		tailStale = latestLogEnd.Before(windowEnd.Add(-endTolerance))
+	} else {
+		// No log observations at all: the whole window is an uncovered tail.
+		factors["last_log_end_gap_seconds"] = window.Seconds()
+	}
+	stale := logUsable > 0 && (whollyOutside || tailStale)
+	lowCoverage := ratio < lowCoverageThreshold
+
+	factors["observation_sources"] = usable
+	factors["log_observation_sources"] = logUsable
+	factors["metric_observation_sources"] = metricUsable
+	factors["observation_coverage"] = len(logIntervals) > 0
+	factors["stale_observation"] = stale
+	factors["low_coverage"] = lowCoverage
+	factors["coverage_ratio"] = ratio
+	factors["observation_details"] = details
+	if stale {
+		issues = append(issues, "stale_observation")
+	}
+	if lowCoverage {
+		issues = append(issues, "low_coverage")
+	}
+	return issues, factors
 }
 
 // relatedAlertWire is the per-row shape persisted into
@@ -354,7 +714,10 @@ func marshalOrDefault(v any, def string) string {
 	return string(b)
 }
 
-func buildConfidenceFactors(ex extractedReport, toolCallCount int) string {
+// buildConfidenceFactors merges the six legacy factors with the coverage
+// assessment produced by assessObservationCoverage. The legacy keys are
+// kept verbatim because the SPA and QA both read them.
+func buildConfidenceFactors(ex extractedReport, toolCallCount int, extra map[string]any) string {
 	factors := map[string]any{
 		"evidence_steps":    len(ex.Evidence),
 		"tool_call_count":   toolCallCount,
@@ -362,6 +725,9 @@ func buildConfidenceFactors(ex extractedReport, toolCallCount int) string {
 		"has_affected_win":  ex.AffectedWindow != "",
 		"has_suggested":     len(ex.Suggested) > 0,
 		"narrative_present": true,
+	}
+	for key, value := range extra {
+		factors[key] = value
 	}
 	b, _ := json.Marshal(factors)
 	return string(b)
