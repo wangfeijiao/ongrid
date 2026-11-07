@@ -54,18 +54,19 @@ func (f *fakeNotifier) SendVia(_ context.Context, msg notify.Message, sender not
 type fakeRepo struct {
 	now func() time.Time
 
-	incidents     map[uint64]*model.Incident
-	byDedupe      map[string]*model.Incident
-	nextID        uint64
-	silences      []*model.Silence
-	channels      map[string]*model.Channel
-	rules         map[string]*model.Rule
-	deliveries    []*model.Delivery
-	events        []*model.Event
-	createIncErr  error
-	bumpCalls     int
-	reopenCalls   int
-	notifiedCalls map[uint64]time.Time
+	incidents        map[uint64]*model.Incident
+	byDedupe         map[string]*model.Incident
+	nextID           uint64
+	silences         []*model.Silence
+	channels         map[string]*model.Channel
+	rules            map[string]*model.Rule
+	deliveries       []*model.Delivery
+	events           []*model.Event
+	createIncErr     error
+	listIncidentsErr error
+	bumpCalls        int
+	reopenCalls      int
+	notifiedCalls    map[uint64]time.Time
 }
 
 func newFakeRepo() *fakeRepo {
@@ -232,8 +233,30 @@ func (r *fakeRepo) seedMetricRawRules(t *testing.T) {
 	}
 }
 
-func (r *fakeRepo) ListIncidents(context.Context, IncidentFilter) ([]*model.Incident, error) {
-	return nil, nil
+func (r *fakeRepo) ListIncidents(_ context.Context, f IncidentFilter) ([]*model.Incident, error) {
+	if r.listIncidentsErr != nil {
+		return nil, r.listIncidentsErr
+	}
+	out := make([]*model.Incident, 0, len(r.incidents))
+	for _, inc := range r.incidents {
+		if f.Status != "" && inc.Status != f.Status {
+			continue
+		}
+		if f.RuleKey != "" && inc.Rule != f.RuleKey {
+			continue
+		}
+		out = append(out, inc)
+	}
+	if f.Offset > 0 {
+		if f.Offset >= len(out) {
+			return nil, nil
+		}
+		out = out[f.Offset:]
+	}
+	if f.Limit > 0 && len(out) > f.Limit {
+		out = out[:f.Limit]
+	}
+	return out, nil
 }
 
 func (r *fakeRepo) CountIncidents(context.Context, IncidentFilter) (int64, error) {
