@@ -586,14 +586,23 @@ func (u *Usecase) FinishDelivery(ctx context.Context, deliveryID, incidentID uin
 	sentAt := &occurredAt
 	status := model.DeliveryStatusSuccess
 	var errMsg *string
+	var responseJSON *string
 	eventType := model.EventTypeNotificationSent
 	if sendErr != nil {
 		status = model.DeliveryStatusFailed
 		s := sendErr.Error()
 		errMsg = &s
 		eventType = model.EventTypeNotificationFailed
+		// DingTalk / WeCom reject messages with HTTP 200 + a business
+		// errcode. Persist the provider response so the delivery row shows
+		// why nothing arrived instead of a bare "failed".
+		var deliveryErr *notify.DeliveryError
+		if errors.As(sendErr, &deliveryErr) && deliveryErr.Body != "" {
+			body := deliveryErr.Body
+			responseJSON = &body
+		}
 	}
-	if err := u.repo.UpdateDeliveryStatus(ctx, deliveryID, status, 1, nil, nil, errMsg, sentAt, &finishedAt); err != nil {
+	if err := u.repo.UpdateDeliveryStatus(ctx, deliveryID, status, 1, nil, responseJSON, errMsg, sentAt, &finishedAt); err != nil {
 		return err
 	}
 	reason := channelName

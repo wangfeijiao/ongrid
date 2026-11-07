@@ -1,10 +1,15 @@
 package alert
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/alert"
+	"github.com/ongridio/ongrid/internal/pkg/notify"
 )
 
 func chWithConfig(name, typ string, cfg map[string]string) *model.Channel {
@@ -55,5 +60,54 @@ func TestChannelHasDestination_EndpointKey(t *testing.T) {
 	}
 	if channelHasDestination(chWithConfig("b", "slack", map[string]string{})) {
 		t.Error("empty config should not be a destination")
+	}
+}
+
+// TestFinishDeliveryPersistsProviderResponse checks that a provider-level
+// rejection (HTTP 200 + business errcode) leaves the response body in the
+// delivery row, so operators can see why nothing arrived.
+func TestFinishDeliveryPersistsProviderResponse(t *testing.T) {
+	repo := newFakeRepo()
+	uc := NewUsecase(repo, nil)
+	ctx := context.Background()
+	id, err := uc.RecordDelivery(ctx, 1, 2)
+	if err != nil {
+		t.Fatalf("RecordDelivery: %v", err)
+	}
+	providerErr := &notify.DeliveryError{
+		StatusCode: 200,
+		Body:       `{"errcode":310000,"errmsg":"keyword not match"}`,
+		Reason:     "errcode 310000: keyword not match",
+	}
+	if err := uc.FinishDelivery(ctx, id, 1, "dingtalk", providerErr, time.Now()); err != nil {
+		t.Fatalf("FinishDelivery: %v", err)
+	}
+	d := repo.deliveries[0]
+	if d.Status != model.DeliveryStatusFailed {
+		t.Errorf("status = %s, want failed", d.Status)
+	}
+	if d.ResponseJSON == nil || !strings.Contains(*d.ResponseJSON, "310000") {
+		t.Errorf("response_json = %v, want errcode body", d.ResponseJSON)
+	}
+	if d.ErrorMessage == nil || !strings.Contains(*d.ErrorMessage, "310000") {
+		t.Errorf("error_message = %v, want rejection reason", d.ErrorMessage)
+	}
+}
+
+// TestFinishDeliveryLeavesResponseEmptyForPlainErrors keeps the row shape
+// unchanged for non-provider failures (network errors, bad config).
+func TestFinishDeliveryLeavesResponseEmptyForPlainErrors(t *testing.T) {
+	repo := newFakeRepo()
+	uc := NewUsecase(repo, nil)
+	ctx := context.Background()
+	id, err := uc.RecordDelivery(ctx, 1, 2)
+	if err != nil {
+		t.Fatalf("RecordDelivery: %v", err)
+	}
+	if err := uc.FinishDelivery(ctx, id, 1, "webhook", fmt.Errorf("post: dial timeout"), time.Now()); err != nil {
+		t.Fatalf("FinishDelivery: %v", err)
+	}
+	if repo.deliveries[0].ResponseJSON != nil {
+		t.Errorf("response_json = %v, want nil", repo.deliveries[0].ResponseJSON)
 	}
 }

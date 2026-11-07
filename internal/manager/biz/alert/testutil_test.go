@@ -528,11 +528,12 @@ func (r *fakeRepo) CreateDelivery(_ context.Context, d *model.Delivery) error {
 	return nil
 }
 
-func (r *fakeRepo) UpdateDeliveryStatus(_ context.Context, id uint64, status string, attempt uint32, _ *string, _ *string, errMsg *string, sentAt, finishedAt *time.Time) error {
+func (r *fakeRepo) UpdateDeliveryStatus(_ context.Context, id uint64, status string, attempt uint32, _ *string, responseJSON *string, errMsg *string, sentAt, finishedAt *time.Time) error {
 	for _, d := range r.deliveries {
 		if d.ID == id {
 			d.Status = status
 			d.AttemptCount = attempt
+			d.ResponseJSON = responseJSON
 			d.ErrorMessage = errMsg
 			d.SentAt = sentAt
 			d.FinishedAt = finishedAt
