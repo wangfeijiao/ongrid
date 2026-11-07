@@ -371,7 +371,7 @@ const BUILTIN_RULE_NAMES: Record<string, { zh: string; en: string }> = {
   disk_high: { zh: '磁盘高占用', en: 'Disk high' },
   load1_high: { zh: 'Load1 高', en: 'Load1 high' },
   device_offline: { zh: '设备离线', en: 'Device offline' },
-  scrape_down: { zh: 'Scrape Down', en: 'Scrape down' },
+  scrape_down: { zh: '监控采集目标不可达', en: 'Scrape target down' },
   prom_ingest_fail: { zh: 'Prom 写入失败', en: 'Prom write failure' },
   disk_full_warning: { zh: '磁盘使用率 > 85%', en: 'Disk usage > 85%' },
   cpu_high_default: { zh: 'CPU 高负载（PromQL）', en: 'CPU high load (PromQL)' },
