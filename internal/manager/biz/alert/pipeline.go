@@ -491,51 +491,19 @@ func (e *PipelineEvaluator) notify(ctx context.Context, res *FiringResult, summa
 	if res == nil || res.Incident == nil {
 		return
 	}
-	msg := notify.Message{
-		Subject:    summary,
-		Severity:   notify.Severity(res.Incident.Severity),
-		Source:     source,
-		DedupeKey:  res.Incident.DedupeKey,
-		OccurredAt: at,
-		Labels: map[string]string{
-			"rule":        res.Incident.Rule,
-			"incident_id": fmt.Sprintf("%d", res.Incident.ID),
-		},
-	}
-	// Preserve application identity for notification routing and correlation.
-	// Control labels such as incident_id/rule still come from the incident.
-	if labels, err := res.Incident.Labels(); err != nil {
-		e.log.Warn("alert: decode notification identity failed", slog.Uint64("incident_id", res.Incident.ID), slog.Any("err", err))
-	} else {
-		for _, key := range []string{"service", "service_namespace", "deployment_environment_name", "service_instance_id", "span_name"} {
-			if value, ok := labels[key]; ok {
-				msg.Labels[key] = value
-			}
-		}
-	}
-	if res.Incident.DeviceID != nil {
-		deviceID := *res.Incident.DeviceID
-		msg.Labels["device_id"] = fmt.Sprintf("%d", deviceID)
-		if e.deviceIdentity != nil {
-			identity, err := e.deviceIdentity(ctx, deviceID)
-			if err != nil {
-				e.log.Warn("alert: resolve device identity for notification failed",
-					slog.Uint64("device_id", deviceID), slog.Any("err", err))
-			} else if display := deviceDisplay(identity); display != "" {
-				msg.Subject = strings.ReplaceAll(msg.Subject,
-					fmt.Sprintf("device_id=%d", deviceID), "device="+display)
-				if identity.Hostname != "" {
-					msg.Labels["device_hostname"] = identity.Hostname
-				}
-				if identity.IPAddress != "" {
-					msg.Labels["device_ip"] = identity.IPAddress
-				}
-			}
-		}
-	}
-	if msg.Severity == "" {
-		msg.Severity = notify.SeverityWarning
-	}
+	// Decode labels + resolve the device for display, then render the shared
+	// readable message. Both steps are best-effort and never drop the
+	// notification; dedupe keys, incident ownership, inhibition and recovery
+	// are untouched. The same renderer runs on the retry path
+	// (buildIncidentMessage), so the two cannot drift.
+	dev := resolveIncidentDevice(ctx, res.Incident, e.deviceIdentity, e.log)
+	msg := renderIncidentMessage(notificationRender{
+		Incident: res.Incident,
+		Summary:  summary,
+		Source:   source,
+		At:       at,
+		Device:   dev,
+	})
 	e.uc.MaybeNotify(ctx, res, msg, NotifyOpts{
 		Notifier:        e.notifier,
 		Resolver:        e.resolver,

@@ -224,11 +224,19 @@ func TestPipelineNotification_ResolvesDeviceIDToHostnameAndIP(t *testing.T) {
 		t.Fatalf("notifications = %d, want 1", len(notifier.msgs))
 	}
 	msg := notifier.msgs[0]
-	if strings.Contains(msg.Subject, "device_id=2") {
-		t.Fatalf("subject still exposes raw device id: %q", msg.Subject)
+	// The readable subject is the rule title; the technical summary (with
+	// the resolved device display) now lives in the 详情 body line.
+	if msg.Subject == "" {
+		t.Fatalf("subject must not be empty")
 	}
-	if !strings.Contains(msg.Subject, "device=VM-4-8-ubuntu (10.2.4.8)") {
-		t.Fatalf("subject = %q, want resolved device identity", msg.Subject)
+	if strings.Contains(msg.Body, "device_id=2") {
+		t.Fatalf("detail still exposes raw device id: %q", msg.Body)
+	}
+	if !strings.Contains(msg.Body, "device=VM-4-8-ubuntu (10.2.4.8)") {
+		t.Fatalf("body = %q, want resolved device identity", msg.Body)
+	}
+	if !strings.Contains(msg.Body, "对象：") || !strings.Contains(msg.Body, "主机 VM-4-8-ubuntu / 10.2.4.8") {
+		t.Fatalf("body = %q, want readable object line with host", msg.Body)
 	}
 	if msg.Labels["device_id"] != "2" || msg.Labels["device_hostname"] != "VM-4-8-ubuntu" || msg.Labels["device_ip"] != "10.2.4.8" {
 		t.Fatalf("labels = %#v", msg.Labels)

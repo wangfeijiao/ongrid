@@ -333,8 +333,35 @@ func (s *webhookSender) Send(ctx context.Context, msg Message) error {
 	return nil
 }
 
+// severityLabel renders the severity as a short Chinese tag for the text
+// channels (DingTalk / WeCom / Feishu / Telegram / Generic). It is
+// display-only: Message.Severity stays the canonical enum used by channel
+// routing and severity filters, so no downstream matcher sees a new value.
+// Unknown or legacy values are kept in uppercase English rather than
+// dropped, and an empty severity still produces a visible tag.
+func severityLabel(sev Severity) string {
+	switch sev {
+	case SeverityCritical:
+		return "严重"
+	case SeverityWarning:
+		return "警告"
+	case SeverityInfo:
+		return "提示"
+	case "error":
+		return "错误"
+	case "fatal":
+		return "致命"
+	default:
+		upper := strings.ToUpper(strings.TrimSpace(string(sev)))
+		if upper == "" {
+			return "告警"
+		}
+		return upper
+	}
+}
+
 func formatText(msg Message) string {
-	parts := []string{fmt.Sprintf("[%s] %s", strings.ToUpper(string(msg.Severity)), msg.Subject)}
+	parts := []string{fmt.Sprintf("[%s] %s", severityLabel(msg.Severity), msg.Subject)}
 	if msg.Body != "" {
 		parts = append(parts, msg.Body)
 	}

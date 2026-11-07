@@ -173,7 +173,7 @@ func seedScrapeDownRule(ctx context.Context, repo *Repo) error {
 	row := &model.Rule{
 		RuleKey:        "scrape_down",
 		Kind:           model.RuleKindMetricRaw,
-		Name:           "Scrape Down",
+		Name:           "监控采集目标不可达",
 		SourceType:     model.RuleSourceBuiltin,
 		ScopeType:      model.RuleScopeMonitoringPipeline,
 		JoinMode:       model.RuleJoinModeAll,
