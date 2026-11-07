@@ -3,6 +3,7 @@ package notify
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -208,5 +209,121 @@ func TestSlackSenderColorByUnknownSeverity(t *testing.T) {
 		if got := slackColor(sev); got != want {
 			t.Errorf("slackColor(%q) = %q, want %q", sev, got, want)
 		}
+	}
+}
+
+// TestDingTalkSenderRejectsBusinessErrcode locks the fix for the
+// "hundreds of successful deliveries, zero messages received" incident:
+// DingTalk answers HTTP 200 with {"errcode":310000,...} when the robot's
+// keyword / sign / IP policy rejects a message. Status-only checking used
+// to record those as successful deliveries.
+func TestDingTalkSenderRejectsBusinessErrcode(t *testing.T) {
+	const rejected = `{"errcode":310000,"errmsg":"keyword not match"}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(rejected))
+	}))
+	defer srv.Close()
+
+	err := NewDingTalkSender("dingtalk", srv.URL, "", srv.Client()).
+		Send(context.Background(), Message{Subject: "edge offline", Severity: SeverityWarning})
+	if err == nil {
+		t.Fatal("Send returned nil for a DingTalk business rejection")
+	}
+	var de *DeliveryError
+	if !errors.As(err, &de) {
+		t.Fatalf("error type = %T, want *DeliveryError", err)
+	}
+	if de.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", de.StatusCode)
+	}
+	if de.Body != rejected {
+		t.Errorf("body = %q, want %q", de.Body, rejected)
+	}
+	if !strings.Contains(de.Reason, "310000") {
+		t.Errorf("reason = %q, want errcode", de.Reason)
+	}
+}
+
+func TestDingTalkSenderAcceptsOKAndToleratesPlainText(t *testing.T) {
+	cases := []struct{ name, body string }{
+		{"errcode zero", `{"errcode":0,"errmsg":"ok"}`},
+		{"empty body", ""},
+		{"plain text", "ok"},
+		{"unrelated json", `{"ok":true}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			if err := NewDingTalkSender("dingtalk", srv.URL, "", srv.Client()).
+				Send(context.Background(), Message{Subject: "s"}); err != nil {
+				t.Fatalf("Send: %v", err)
+			}
+		})
+	}
+}
+
+func TestWeComSenderRejectsBusinessErrcode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errcode":93000,"errmsg":"invalid webhook url"}`))
+	}))
+	defer srv.Close()
+	if err := NewWeComSender("wecom", srv.URL, srv.Client()).
+		Send(context.Background(), Message{Subject: "s"}); err == nil {
+		t.Fatal("WeCom business rejection was treated as success")
+	}
+}
+
+// TestSlackSenderUnaffectedByErrcodeEnvelope keeps providers that answer
+// with plain text / their own schema on the status-only path.
+func TestSlackSenderUnaffectedByErrcodeEnvelope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errcode":310000,"errmsg":"not a slack response"}`))
+	}))
+	defer srv.Close()
+	if err := NewSlackSender("slack", srv.URL, srv.Client()).
+		Send(context.Background(), Message{Subject: "s"}); err != nil {
+		t.Fatalf("Slack send: %v", err)
+	}
+}
+
+func TestWebhookSenderCapturesHTTPErrorBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("upstream unavailable"))
+	}))
+	defer srv.Close()
+	err := NewDingTalkSender("dingtalk", srv.URL, "", srv.Client()).
+		Send(context.Background(), Message{Subject: "s"})
+	var de *DeliveryError
+	if !errors.As(err, &de) {
+		t.Fatalf("error type = %T, want *DeliveryError", err)
+	}
+	if de.Body != "upstream unavailable" {
+		t.Errorf("body = %q", de.Body)
+	}
+}
+
+func TestWebhookSenderTruncatesOversizedResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(strings.Repeat("x", maxResponseBytes*2)))
+	}))
+	defer srv.Close()
+	err := NewDingTalkSender("dingtalk", srv.URL, "", srv.Client()).
+		Send(context.Background(), Message{Subject: "s"})
+	var de *DeliveryError
+	if !errors.As(err, &de) {
+		t.Fatalf("error type = %T, want *DeliveryError", err)
+	}
+	if len(de.Body) != maxResponseBytes {
+		t.Errorf("body len = %d, want %d", len(de.Body), maxResponseBytes)
 	}
 }

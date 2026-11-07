@@ -9,19 +9,42 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 )
 
+// responseCheck inspects a provider's HTTP response body after a 2xx
+// status. DingTalk and WeCom answer HTTP 200 even when a message is
+// rejected (errcode 310000 for keyword / sign / IP-policy failures), so
+// the status line alone is not a delivery outcome. A nil check keeps
+// providers that reply with plain text on the status-only path.
+type responseCheck func(statusCode int, body []byte) error
+
+const maxResponseBytes = 8 << 10
+
+// DeliveryError carries the provider response behind a failed send so the
+// alert pipeline can persist it in notification_deliveries.response_json.
+type DeliveryError struct {
+	StatusCode int
+	Body       string
+	Reason     string
+}
+
+func (e *DeliveryError) Error() string {
+	return fmt.Sprintf("notify: provider rejected delivery (http %d): %s", e.StatusCode, e.Reason)
+}
+
 type webhookSender struct {
-	name       string
-	endpoint   string
-	secret     string
-	client     *http.Client
-	buildBody  func(Message) (any, error)
-	signTarget func(endpoint, secret string, body []byte) (string, map[string]string, error)
+	name          string
+	endpoint      string
+	secret        string
+	client        *http.Client
+	buildBody     func(Message) (any, error)
+	signTarget    func(endpoint, secret string, body []byte) (string, map[string]string, error)
+	checkResponse responseCheck
 }
 
 // NewGenericWebhookSender posts the normalized Message JSON. When secret is
@@ -156,12 +179,14 @@ func NewFeishuSender(name, endpoint, secret string, client *http.Client) Sender 
 
 // NewDingTalkSender posts a text payload compatible with DingTalk custom bots.
 func NewDingTalkSender(name, endpoint, secret string, client *http.Client) Sender {
-	return newWebhookSender(name, endpoint, secret, client, func(msg Message) (any, error) {
+	s := newWebhookSender(name, endpoint, secret, client, func(msg Message) (any, error) {
 		return map[string]any{
 			"msgtype": "text",
 			"text":    map[string]string{"content": formatText(msg)},
 		}, nil
 	}, signDingTalkURL)
+	s.checkResponse = checkDingTalkResponse
+	return s
 }
 
 // NewWeComSender posts a text payload compatible with 企业微信 (WeCom) group
@@ -169,12 +194,14 @@ func NewDingTalkSender(name, endpoint, secret string, client *http.Client) Sende
 // has no extra signing — the secret query string IS the credential. Same
 // JSON shape as DingTalk: {"msgtype":"text","text":{"content":"..."}}.
 func NewWeComSender(name, endpoint string, client *http.Client) Sender {
-	return newWebhookSender(name, endpoint, "", client, func(msg Message) (any, error) {
+	s := newWebhookSender(name, endpoint, "", client, func(msg Message) (any, error) {
 		return map[string]any{
 			"msgtype": "text",
 			"text":    map[string]string{"content": formatText(msg)},
 		}, nil
 	}, nil)
+	s.checkResponse = checkDingTalkResponse
+	return s
 }
 
 // NewTelegramSender posts to the Telegram Bot API sendMessage endpoint.
@@ -191,6 +218,24 @@ func NewTelegramSender(name, endpoint, chatID string, client *http.Client) Sende
 	}, nil)
 }
 
+// checkDingTalkResponse parses the {"errcode":N,"errmsg":"..."} envelope
+// shared by DingTalk and WeCom custom bots. Empty / non-JSON bodies are
+// tolerated so test doubles and proxies answering with plain text keep
+// working; only an explicit non-zero errcode counts as a rejection.
+func checkDingTalkResponse(_ int, body []byte) error {
+	var out struct {
+		ErrCode int    `json:"errcode"`
+		ErrMsg  string `json:"errmsg"`
+	}
+	if len(body) == 0 || json.Unmarshal(body, &out) != nil {
+		return nil
+	}
+	if out.ErrCode != 0 {
+		return fmt.Errorf("errcode %d: %s", out.ErrCode, out.ErrMsg)
+	}
+	return nil
+}
+
 func newWebhookSender(
 	name string,
 	endpoint string,
@@ -198,7 +243,7 @@ func newWebhookSender(
 	client *http.Client,
 	buildBody func(Message) (any, error),
 	signTarget func(endpoint, secret string, body []byte) (string, map[string]string, error),
-) Sender {
+) *webhookSender {
 	if name == "" {
 		name = "webhook"
 	}
@@ -251,8 +296,39 @@ func (s *webhookSender) Send(ctx context.Context, msg Message) error {
 		return fmt.Errorf("post: %w", err)
 	}
 	defer resp.Body.Close()
+	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if readErr != nil {
+		return fmt.Errorf("read response body: %w", readErr)
+	}
+	tooLarge := len(respBody) > maxResponseBytes
+	if tooLarge {
+		respBody = respBody[:maxResponseBytes]
+	}
+	bodyText := string(respBody)
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("unexpected status: %s", resp.Status)
+		return &DeliveryError{
+			StatusCode: resp.StatusCode,
+			Body:       bodyText,
+			Reason:     fmt.Sprintf("unexpected status: %s", resp.Status),
+		}
+	}
+	// A truncated body can no longer be parsed as a provider envelope;
+	// treat it as a failure instead of silently accepting an unverified reply.
+	if tooLarge {
+		return &DeliveryError{
+			StatusCode: resp.StatusCode,
+			Body:       bodyText,
+			Reason:     fmt.Sprintf("response body exceeds %d bytes", maxResponseBytes),
+		}
+	}
+	if s.checkResponse != nil {
+		if err := s.checkResponse(resp.StatusCode, respBody); err != nil {
+			return &DeliveryError{
+				StatusCode: resp.StatusCode,
+				Body:       bodyText,
+				Reason:     err.Error(),
+			}
+		}
 	}
 	return nil
 }
