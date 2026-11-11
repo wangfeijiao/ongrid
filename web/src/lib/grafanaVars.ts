@@ -26,24 +26,47 @@
 // user's selected range. Grafana's own rule is "max(1m, 4 * step)" —
 // we follow the same shape with bucket-based defaults so the panels
 // render correctly without us emulating Grafana's intervalCalculator.
-export function rateIntervalForRange(range: string): string {
-  const ms = rangeToMs(range);
+// effectiveSpanMs prefers the ACTUAL window (toMs - fromMs) over the range
+// token. A custom window arrives as range="custom", which rangeToMs cannot
+// parse and silently treats as 1h. That used to pin every long custom query
+// to a 15s step (~518k points per series over 90 days) and a 5m rate
+// interval, making 90-day retention unusable from the UI.
+function effectiveSpanMs(range: string, spanMs?: number): number {
+  return spanMs !== undefined && Number.isFinite(spanMs) && spanMs > 0
+    ? spanMs
+    : rangeToMs(range);
+}
+
+// stepMsForSpan derives the query_range bucket from the real time span so
+// every window stays near ~360 points per series, whatever its length.
+export function stepMsForSpan(spanMs: number): number {
+  const ms = Number.isFinite(spanMs) && spanMs > 0 ? spanMs : 3600_000;
+  const raw = Math.max(15_000, Math.floor(ms / 360));
+  // Align to whole minutes so the Go duration stays readable ("6h" rather
+  // than "21600s"); the 15s floor still applies to short windows.
+  return raw < 60_000 ? raw : Math.ceil(raw / 60_000) * 60_000;
+}
+
+// rateIntervalForRange picks a `[$__rate_interval]` value sized to the
+// window. The <=7d tiers keep their historical values; the longer tiers
+// keep the rate window from collapsing relative to a multi-hour step.
+export function rateIntervalForRange(range: string, spanMs?: number): string {
+  const ms = effectiveSpanMs(range, spanMs);
   if (ms <= 15 * 60_000) return '1m';
   if (ms <= 6 * 3600_000) return '5m';
   if (ms <= 24 * 3600_000) return '5m';
   if (ms <= 7 * 86400_000) return '1h';
+  if (ms <= 30 * 86400_000) return '2h';
   return '6h';
 }
 
-// stepForRange picks the query_range `step` so we get ~360 buckets
-// across the range (matches recharts' practical sweet spot — 720+
-// buckets visibly lag on dense panels). Returned as a Go duration
-// string the backend's time.ParseDuration accepts.
-export function stepForRange(range: string): string {
-  const ms = rangeToMs(range);
-  // bucket = max(15s, ms / 360)
-  const bucketMs = Math.max(15_000, Math.floor(ms / 360));
-  return msToDurationString(bucketMs);
+// stepForRange picks the query_range `step` so we get ~360 buckets across
+// the window (720+ buckets visibly lag on dense panels). When spanMs is
+// given (the real end-start) it wins over the range token — custom windows
+// pass "custom" here and must not fall back to the 1h default. Returned as
+// a Go duration string the backend's time.ParseDuration accepts.
+export function stepForRange(range: string, spanMs?: number): string {
+  return msToDurationString(stepMsForSpan(effectiveSpanMs(range, spanMs)));
 }
 
 function msToDurationString(ms: number): string {
@@ -72,6 +95,9 @@ function rangeToMs(range: string): number {
 export type VarContext = {
   range: string;
   query: URLSearchParams; // typically location.search
+  // Actual window length in ms; required for correct step/rate sizing on
+  // custom windows. Optional so existing callers and tests keep working.
+  spanMs?: number;
 };
 
 // substitute replaces `$varname` and `${varname}` tokens in `expr`. The
@@ -84,9 +110,10 @@ export function substitute(expr: string, ctx: VarContext): string {
 
   // Resolve known special vars first so the regex pass below can fall
   // back to URL params for everything else.
+  const rate = rateIntervalForRange(ctx.range, ctx.spanMs);
   const special: Record<string, string> = {
-    __rate_interval: rateIntervalForRange(ctx.range),
-    __interval: rateIntervalForRange(ctx.range),
+    __rate_interval: rate,
+    __interval: rate,
     __range: ctx.range,
   };
 

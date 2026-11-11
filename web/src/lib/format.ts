@@ -54,6 +54,21 @@ export function fullDateTime(input: string | number | Date | null | undefined): 
   return t.toLocaleString(intlLocale());
 }
 
+// fixedDateTime - local-timezone YYYY-MM-DD HH:MM:SS for chart
+// tooltips whose x value is a raw unix-millisecond timestamp. Without
+// a labelFormatter recharts prints the bare 13-digit number, which is
+// unreadable on multi-day ranges. Locale-independent on purpose: zh-CN
+// and en-US operators comparing screenshots see the same clock. Kept in
+// this module so every timeseries panel shares one tooltip format.
+export function fixedDateTime(input: string | number | Date | null | undefined): string {
+  if (input === null || input === undefined) return '—';
+  const t = typeof input === 'string' || typeof input === 'number' ? new Date(input) : input;
+  if (Number.isNaN(t.getTime())) return '—';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())} `
+    + `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`;
+}
+
 // formatNumber — Intl.NumberFormat with operator locale. English
 // shows 1,234,567; Chinese leaves grouping off by default. Used in
 // place of bare String(n) or n.toString() in metric / count renders.

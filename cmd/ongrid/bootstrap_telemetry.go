@@ -83,14 +83,20 @@ func bootstrapTelemetry(rootCtx context.Context, cfg *config.Config, log *slog.L
 		}
 		promwriteClient = pkgpromwrite.NewWithResolverAndHTTPClient(settings.promResolver, promHTTPClient, log.With(slog.String("comp", "promwrite")))
 		promQueryClient = pkgpromquery.NewWithResolverAndHTTPClient(settings.promResolver, promHTTPClient, log.With(slog.String("comp", "promquery")))
+		ingestOpts := make([]managerbizpromwrite.Option, 0, 1)
+		if cfg.Prom.HighCardinalityFilter {
+			ingestOpts = append(ingestOpts, managerbizpromwrite.WithHighCardinalityFilter())
+		}
 		promwriteIngester = managerbizpromwrite.NewIngester(
 			promwriteClient,
 			log.With(slog.String("comp", "promwrite-ingest")),
+			ingestOpts...,
 		)
 		log.Info("prom enabled",
 			slog.String("query_fallback", settings.queryFallback),
 			slog.String("write_fallback", cfg.Prom.RemoteWriteURL),
 			slog.Bool("tls_insecure", cfg.Prom.TLSInsecure),
+			slog.Bool("high_cardinality_filter", cfg.Prom.HighCardinalityFilter),
 			slog.String("note", "URLs, auth and TLS hot-reload from system_settings"),
 		)
 	} else {

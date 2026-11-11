@@ -30,8 +30,13 @@ describe('TimeRangePicker', () => {
     expect(screen.getByRole('alert')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('结束时间'), { target: { value: '2026-09-08T02:00:30' } });
     expect(screen.getByRole('button', { name: '应用' })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('结束时间'), { target: { value: '2026-09-16T02:00:00' } });
+    // 90 天现在是合法窗口（与 Prometheus 保留期一致）；只有超过 90 天
+    // 的窗口才被拒绝。
+    fireEvent.change(screen.getByLabelText('结束时间'), { target: { value: '2026-12-20T02:00:00' } });
     expect(screen.getByRole('button', { name: '应用' })).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent('90 天');
+    fireEvent.change(screen.getByLabelText('结束时间'), { target: { value: '2026-12-06T02:00:00' } });
+    expect(screen.getByRole('button', { name: '应用' })).toBeEnabled();
     fireEvent.change(screen.getByLabelText('结束时间'), { target: { value: '2026-09-08T03:00:00' } });
     await user.click(screen.getByRole('button', { name: '应用' }));
     expect(onChange).toHaveBeenCalledTimes(1);

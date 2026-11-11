@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -57,19 +58,49 @@ type Ingester struct {
 	w   Writer
 	log *slog.Logger
 
+	// filterHighCardinality is opt-in (see WithHighCardinalityFilter). When
+	// false, buildPromSamples keeps every sample — the historical behaviour.
+	filterHighCardinality bool
+	// dropped counts samples discarded by the filter. Atomic because edge
+	// pushes are handled concurrently by frontier workers.
+	dropped atomic.Uint64
+
 	mu              sync.Mutex
 	consecutiveFail int
 	lastFailureAt   time.Time
 }
 
+// Option configures optional Ingester behaviour. Options keep NewIngester's
+// existing two-argument call shape intact.
+type Option func(*Ingester)
+
+// WithHighCardinalityFilter enables dropping the metric families listed in
+// filter.go before remote_write. It is a feature flag: deployments opt in
+// through ONGRID_PROM_HIGH_CARDINALITY_FILTER and can roll back with an env
+// change plus a restart, without rebuilding the binary.
+func WithHighCardinalityFilter() Option {
+	return func(i *Ingester) { i.filterHighCardinality = true }
+}
+
 // NewIngester builds an Ingester. A nil log falls back to slog.Default().
 // The Writer must be non-nil; the caller is expected to pass a configured
 // promwrite.Client (or a fake in tests).
-func NewIngester(w Writer, log *slog.Logger) *Ingester {
+func NewIngester(w Writer, log *slog.Logger, opts ...Option) *Ingester {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Ingester{w: w, log: log}
+	i := &Ingester{w: w, log: log}
+	for _, opt := range opts {
+		opt(i)
+	}
+	return i
+}
+
+// DroppedSamples returns the cumulative number of samples discarded by the
+// high-cardinality filter. Useful for verifying the filter is active after
+// a rollout; it stays 0 when the filter is disabled.
+func (i *Ingester) DroppedSamples() uint64 {
+	return i.dropped.Load()
 }
 
 // Health returns the current health snapshot. Safe for concurrent use; the
@@ -118,7 +149,10 @@ func (i *Ingester) Push(ctx context.Context, deviceID uint64, source string, sam
 	if source != "" {
 		fixedLabels["ongrid_source"] = source
 	}
-	out := buildPromSamples(samples, fixedLabels, reservedHostLabels)
+	out := i.build(ctx, "device_id", deviceID, samples, fixedLabels, reservedHostLabels)
+	if len(out) == 0 {
+		return nil
+	}
 	if err := i.write(ctx, "device_id", deviceID, source, out); err != nil {
 		return err
 	}
@@ -143,7 +177,10 @@ func (i *Ingester) PushKubernetes(ctx context.Context, clusterID uint64, source 
 	if source != "" {
 		fixedLabels["ongrid_source"] = source
 	}
-	out := buildPromSamples(samples, fixedLabels, reservedKubernetesLabels)
+	out := i.build(ctx, "cluster_id", clusterID, samples, fixedLabels, reservedKubernetesLabels)
+	if len(out) == 0 {
+		return nil
+	}
 	if err := i.write(ctx, "cluster_id", clusterID, source, out); err != nil {
 		return err
 	}
@@ -165,9 +202,36 @@ var (
 	}
 )
 
-func buildPromSamples(samples []tunnel.PromSample, fixedLabels map[string]string, reserved map[string]struct{}) []pkgpromwrite.Sample {
+// build converts one push batch and accounts for filtered samples. A batch
+// whose samples were all dropped returns an empty slice; the callers skip the
+// remote_write call so we neither send an empty request nor record a success
+// that never happened.
+func (i *Ingester) build(ctx context.Context, entityLabel string, entityID uint64, samples []tunnel.PromSample, fixedLabels map[string]string, reserved map[string]struct{}) []pkgpromwrite.Sample {
+	out, dropped := buildPromSamples(samples, fixedLabels, reserved, i.filterHighCardinality)
+	if dropped == 0 {
+		return out
+	}
+	i.dropped.Add(uint64(dropped))
+	i.log.DebugContext(ctx, "promwrite: dropped high-cardinality samples",
+		slog.String("entity_label", entityLabel),
+		slog.Uint64("entity_id", entityID),
+		slog.Int("dropped", dropped),
+		slog.Int("kept", len(out)),
+	)
+	return out
+}
+
+// buildPromSamples converts tunnel samples into remote_write samples. When
+// filter is true, high-cardinality families from filter.go are skipped. It
+// returns the kept samples and the number dropped.
+func buildPromSamples(samples []tunnel.PromSample, fixedLabels map[string]string, reserved map[string]struct{}, filter bool) ([]pkgpromwrite.Sample, int) {
 	out := make([]pkgpromwrite.Sample, 0, len(samples))
+	dropped := 0
 	for _, s := range samples {
+		if filter && shouldDropHighCardinalitySample(s.Name) {
+			dropped++
+			continue
+		}
 		labels := make([]pkgpromwrite.Label, 0, len(s.Labels)+1+len(fixedLabels))
 		labels = append(labels, pkgpromwrite.Label{Name: "__name__", Value: s.Name})
 		for k, v := range fixedLabels {
@@ -190,7 +254,7 @@ func buildPromSamples(samples []tunnel.PromSample, fixedLabels map[string]string
 			TsMs:   s.TsMs,
 		})
 	}
-	return out
+	return out, dropped
 }
 
 func (i *Ingester) write(ctx context.Context, entityLabel string, entityID uint64, source string, out []pkgpromwrite.Sample) (retErr error) {

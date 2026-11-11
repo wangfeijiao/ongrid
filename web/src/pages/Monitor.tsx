@@ -65,6 +65,8 @@ const RANGE_PRESETS: { value: string; labelZh: string; labelEn: string }[] = [
   { value: '24h', labelZh: '1 天', labelEn: '1 day' },
   { value: '3d', labelZh: '3 天', labelEn: '3 days' },
   { value: '7d', labelZh: '7 天', labelEn: '7 days' },
+  { value: '30d', labelZh: '30 天', labelEn: '30 days' },
+  { value: '90d', labelZh: '90 天', labelEn: '90 days' },
 ];
 const DEFAULT_RANGE = '1h';
 

@@ -126,6 +126,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Prom.QueryURL != "" {
 		t.Errorf("Prom.QueryURL default = %q, want empty", cfg.Prom.QueryURL)
 	}
+	if cfg.Prom.HighCardinalityFilter {
+		t.Errorf("Prom.HighCardinalityFilter default = true, want false (opt-in)")
+	}
 	if !cfg.Notification.Enabled {
 		t.Errorf("Notification.Enabled default = false, want true (notifications allowed by default; configured channels deliver)")
 	}
@@ -189,6 +192,7 @@ func TestLoadPromOverrides(t *testing.T) {
 	t.Setenv("ONGRID_PROM_URL", "http://prom-staging:9090")
 	t.Setenv("ONGRID_PROM_REMOTE_WRITE_URL", "http://victoriametrics:8428/api/v1/write")
 	t.Setenv("ONGRID_PROM_QUERY_URL", "http://thanos-query:9090")
+	t.Setenv("ONGRID_PROM_HIGH_CARDINALITY_FILTER", "true")
 
 	cfg, err := Load()
 	if err != nil {
@@ -205,6 +209,9 @@ func TestLoadPromOverrides(t *testing.T) {
 	}
 	if cfg.Prom.QueryURL != "http://thanos-query:9090" {
 		t.Errorf("Prom.QueryURL = %q", cfg.Prom.QueryURL)
+	}
+	if !cfg.Prom.HighCardinalityFilter {
+		t.Errorf("Prom.HighCardinalityFilter = false, want true from env")
 	}
 }
 

@@ -298,6 +298,13 @@ type PromConfig struct {
 	// the TSDB's cert. Empty = use system roots.
 	// env: ONGRID_PROM_TLS_CA_FILE; default empty.
 	TLSCAPath string
+
+	// HighCardinalityFilter drops known high-cardinality, low-value metric
+	// families at the manager-side ingest boundary before remote_write.
+	// Opt-in so existing deployments keep every sample by default; turning
+	// it off needs only an env change plus a restart (no rebuild).
+	// env: ONGRID_PROM_HIGH_CARDINALITY_FILTER; default false.
+	HighCardinalityFilter bool
 }
 
 // FrontierClientConfig drives the manager-side service-end SDK that dials
@@ -587,6 +594,7 @@ func Load() (*Config, error) {
 	c.Prom.QueryURL = getEnv("ONGRID_PROM_QUERY_URL", "")
 	c.Prom.TLSInsecure = getEnvBool("ONGRID_PROM_TLS_INSECURE", false)
 	c.Prom.TLSCAPath = getEnv("ONGRID_PROM_TLS_CA_FILE", "")
+	c.Prom.HighCardinalityFilter = getEnvBool("ONGRID_PROM_HIGH_CARDINALITY_FILTER", false)
 	c.Grafana.InternalRootURL = getEnv("ONGRID_GRAFANA_INTERNAL_URL", "http://grafana:3000/grafana")
 	c.Grafana.BootstrapUser = getEnv("ONGRID_GRAFANA_BOOTSTRAP_USER", "admin")
 	c.Grafana.BootstrapPassword = getEnv("ONGRID_GRAFANA_BOOTSTRAP_PASSWORD", "")

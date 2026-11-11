@@ -14,6 +14,10 @@ type Props = {
   minDurationMs?: number;
 };
 
+// 90 days matches the Prometheus retention configured for ongrid. Keep the
+// constant here (and in the validation copy below) in sync with the backend.
+const MAX_WINDOW_MS = 90 * 86400000;
+
 export function TimeRangePicker({ value, presets, onChange, minDurationMs = 1000 }: Props) {
   const { tr } = useI18n();
   const id = useId();
@@ -21,7 +25,7 @@ export function TimeRangePicker({ value, presets, onChange, minDurationMs = 1000
   const [draft, setDraft] = useState({ start: '', end: '' });
   const start = Date.parse(draft.start);
   const end = Date.parse(draft.end);
-  const valid = Number.isFinite(start) && Number.isFinite(end) && end - start >= minDurationMs && end - start <= 7 * 86400000;
+  const valid = Number.isFinite(start) && Number.isFinite(end) && end - start >= minDurationMs && end - start <= MAX_WINDOW_MS;
   const label = value.range === 'custom'
     ? tr('自定义时间', 'Custom range')
     : presets.find((preset) => preset.value === value.range)?.label || tr('时间范围', 'Time range');
@@ -83,8 +87,8 @@ export function TimeRangePicker({ value, presets, onChange, minDurationMs = 1000
               </div>
             ))}
             {!valid && <p id={`${id}-error`} role="alert" className="text-xs text-red-500">{minDurationMs >= 60000
-              ? tr('请选择有效的起止时间，范围为 1 分钟至 7 天。', 'Choose a valid window between 1 minute and 7 days.')
-              : tr('结束时间须晚于开始时间，范围不超过 7 天。', 'End must be after start, within a 7-day window.')}</p>}
+              ? tr('请选择有效的起止时间，范围为 1 分钟至 90 天。', 'Choose a valid window between 1 minute and 90 days.')
+              : tr('结束时间须晚于开始时间，范围不超过 90 天。', 'End must be after start, within a 90-day window.')}</p>}
             <div className="flex justify-end gap-2 pt-1">
               <Button onClick={() => setOpen(false)}>{tr('取消', 'Cancel')}</Button>
               <Button type="submit" variant="primary" disabled={!valid}>{tr('应用', 'Apply')}</Button>
