@@ -294,8 +294,8 @@ export default function SettingsAgent() {
         </div>
         <p className="mb-4 text-xs leading-relaxed text-zinc-500">
           {tr(
-            '设置无浏览器上下文的 Agent 后台任务输出语言，当前包括自动根因分析。显式选择后，手动重新分析也使用同一语言。',
-            'Sets the output language for background Agent work without browser context, currently including automatic root-cause analysis. Once selected, manual reruns use the same language.',
+            '设置无浏览器上下文的 Agent 后台任务输出语言，当前包括自动根因分析。手动重新分析始终跟随当前界面语言，不受此项影响。',
+            'Sets the output language for background Agent work without browser context, currently including automatic root-cause analysis. Manual reruns always follow the current UI language and ignore this setting.',
           )}
         </p>
         {loading ? (
