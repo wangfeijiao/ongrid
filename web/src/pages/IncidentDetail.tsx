@@ -2,7 +2,7 @@ import { useAssistantPage } from '@/lib/assistantPage';
 import { InvestigationEvidence } from '@/components/alerts/InvestigationEvidence';
 import { Button, Label, Input, Textarea } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -1506,6 +1506,11 @@ function AgentSessionCard({ session }: { session: ChatSession }) {
   const { tr } = useI18n();
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
   const [loading, setLoading] = useState(true);
+  // Long final answers are clamped to 3 lines so the timeline stays
+  // scannable; the operator can expand to read the full record.
+  const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+  const previewRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -1551,6 +1556,15 @@ function AgentSessionCard({ session }: { session: ChatSession }) {
     return '';
   }, [messages]);
 
+  // Measure the clamped preview once the text settles: scrollHeight
+  // reports the full content, clientHeight only the 3 visible lines.
+  // Runs while collapsed (mount state), and again when the text changes.
+  useEffect(() => {
+    const el = previewRef.current;
+    if (!el) return;
+    setOverflowing(el.scrollHeight > el.clientHeight + 1);
+  }, [lastAssistantText]);
+
   return (
     <article className="rounded-md border border-zinc-800/60 bg-zinc-950/40 p-3.5">
       <header className="flex items-start justify-between gap-3">
@@ -1590,9 +1604,29 @@ function AgentSessionCard({ session }: { session: ChatSession }) {
           )}
           {lastAssistantText !== '' && (
             <div className="mt-3 rounded border border-zinc-800/60 bg-zinc-900/40 px-2.5 py-2 text-[12px] leading-relaxed text-zinc-200">
-              <div className="line-clamp-3 whitespace-pre-wrap break-words">
-                {lastAssistantText}
-              </div>
+              {expanded ? (
+                // Expanded view renders Markdown like the report's
+                // "analysis record" block below, so headings/bold read
+                // naturally instead of showing ## and ** literally.
+                <div className="md-body break-words">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{lastAssistantText}</ReactMarkdown>
+                </div>
+              ) : (
+                <div ref={previewRef} className="line-clamp-3 whitespace-pre-wrap break-words">
+                  {lastAssistantText}
+                </div>
+              )}
+              {overflowing && (
+                <Button
+                  variant="subtle"
+                  size="sm"
+                  onClick={() => setExpanded((v) => !v)}
+                  className="mt-1.5 inline-flex items-center gap-1"
+                >
+                  {expanded ? '▾' : '▸'}{' '}
+                  {expanded ? tr('收起', 'Collapse') : tr('展开全文', 'Show full text')}
+                </Button>
+              )}
             </div>
           )}
         </>
