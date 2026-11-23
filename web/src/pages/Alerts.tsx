@@ -7,6 +7,7 @@ import { AlertTriangle, CheckCircle2, ListTodo, RefreshCw, Siren, X } from 'luci
 import { Modal } from '@/components/Modal';
 import { cn } from '@/lib/cn';
 import { relativeTime } from '@/lib/format';
+import { describeAlertText, incidentStatusLabel, severityLabel } from '@/lib/alertText';
 import { usePoll } from '@/lib/usePoll';
 import {
   ackIncident,
@@ -34,9 +35,9 @@ const STATUS_FILTERS: { key: string; labelZh: string; labelEn: string }[] = [
 
 const SEVERITY_FILTERS: { key: string; labelZh: string; labelEn: string }[] = [
   { key: '', labelZh: '全部', labelEn: 'All' },
-  { key: 'critical', labelZh: 'Critical', labelEn: 'Critical' },
-  { key: 'warning', labelZh: 'Warning', labelEn: 'Warning' },
-  { key: 'info', labelZh: 'Info', labelEn: 'Info' },
+  { key: 'critical', labelZh: '严重', labelEn: 'Critical' },
+  { key: 'warning', labelZh: '警告', labelEn: 'Warning' },
+  { key: 'info', labelZh: '提示', labelEn: 'Info' },
 ];
 
 const POLL_INTERVAL_MS = 30_000;
@@ -169,7 +170,7 @@ export default function AlertsPage() {
                 )}
               </span>}
           subtitle={tr(
-                  `全局 ${globalOpen} 未确认 · 当前筛选 ${total} 条 · 本页 Critical ${counts.critical}`,
+                  `全局 ${globalOpen} 未确认 · 当前筛选 ${total} 条 · 本页严重 ${counts.critical}`,
                   `${globalOpen} open globally · ${total} in current filter · ${counts.critical} critical on this page`,
                 )}
           actions={<div className="flex gap-2">
@@ -354,11 +355,13 @@ function IncidentRow({
           </div>
         </Link>
       </td>
-      {/* Summary is the truncate-absorber. title= gives the full text on
-          hover — summaries can be long (full PromQL + label set) and the
-          truncate cuts mid-expression. */}
+      {/* Summary is the truncate-absorber. The stored string is the raw
+          `rule: <promql> ⇒ labels (value=…)` form, so we render the parsed
+          one-liner and keep the full text in the hover tooltip. */}
       <td className="w-full max-w-0 px-4 py-2.5 text-zinc-300">
-        <Hint content={incident.summary}><div className="truncate" >{incident.summary}</div></Hint>
+        <Hint content={incident.summary}>
+          <div className="truncate">{describeAlertText(incident.summary, tr).headline}</div>
+        </Hint>
       </td>
       <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">
         {/* Target stays simple: the device (name + id). Detail lives in the
@@ -384,7 +387,7 @@ function IncidentRow({
 
             className="px-2 py-1"
           >
-            {ackBusy ? tr('处理中…', 'Working…') : 'Ack'}
+            {ackBusy ? tr('处理中…', 'Working…') : tr('认领', 'Ack')}
           </Button></Hint>
           <Hint content={viewerTip}><Button variant="outline" size="sm"
             type="button"
@@ -393,7 +396,7 @@ function IncidentRow({
 
             className="px-2 py-1 text-emerald-300"
           >
-            Resolve
+            {tr('解决', 'Resolve')}
           </Button></Hint>
         </div>
       </td>
@@ -455,7 +458,9 @@ function ResolveDialog({
     >
       <div className="space-y-3">
         <div className="rounded-md border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-400">
-          <div className="text-zinc-200">{incident.summary || incident.rule_key}</div>
+          <div className="text-zinc-200">
+            {describeAlertText(incident.summary, tr).headline || incident.rule_key}
+          </div>
           <div className="mt-1 text-[11px] text-zinc-500">incident #{incident.id}</div>
         </div>
         <Label className="block text-xs text-zinc-400">
@@ -510,6 +515,7 @@ function FilterGroup({
 }
 
 function SeverityBadge({ severity }: { severity: IncidentSeverity }) {
+  const { tr } = useI18n();
   const styles =
     severity === 'critical'
       ? 'bg-red-500/15 text-red-300 ring-red-500/40'
@@ -519,12 +525,13 @@ function SeverityBadge({ severity }: { severity: IncidentSeverity }) {
   return (
     <span className={cn('inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset', styles)}>
       {severity === 'critical' ? <Siren size={11} /> : <AlertTriangle size={11} />}
-      {severity}
+      {severityLabel(severity, tr)}
     </span>
   );
 }
 
 function StatusBadge({ status }: { status: IncidentStatus }) {
+  const { tr } = useI18n();
   const styles =
     status === 'open'
       ? 'bg-red-500/10 text-red-300 ring-red-500/30'
@@ -536,7 +543,7 @@ function StatusBadge({ status }: { status: IncidentStatus }) {
   return (
     <span className={cn('inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset', styles)}>
       {status === 'resolved' ? <CheckCircle2 size={11} /> : status === 'silenced' ? <X size={11} /> : <span className="h-1.5 w-1.5 rounded-full bg-current" />}
-      {status}
+      {incidentStatusLabel(status, tr)}
     </span>
   );
 }
