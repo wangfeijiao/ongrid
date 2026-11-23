@@ -11,6 +11,7 @@ import (
 	managerbizpromwrite "github.com/ongridio/ongrid/internal/manager/biz/promwrite"
 	managerbizsetting "github.com/ongridio/ongrid/internal/manager/biz/setting"
 	manageraiopsdata "github.com/ongridio/ongrid/internal/manager/data/aiops/store"
+	managerapmdata "github.com/ongridio/ongrid/internal/manager/data/apm"
 	managerdevicedata "github.com/ongridio/ongrid/internal/manager/data/device/store"
 	managerlogsdata "github.com/ongridio/ongrid/internal/manager/data/logs/store"
 	managerserveragenttrace "github.com/ongridio/ongrid/internal/manager/server/agenttrace"
@@ -182,7 +183,7 @@ func bootstrapTelemetry(rootCtx context.Context, cfg *config.Config, log *slog.L
 	if traceQuery != nil {
 		apmTraces = traceQuery
 	}
-	apmService := managerbizapm.New(apmProm, apmTraces, logsBackendSvc).WithClusterScopes(devices.topologyUC)
+	apmService := managerbizapm.New(apmProm, apmTraces, logsBackendSvc).WithClusterScopes(devices.topologyUC).WithHosts(managerapmdata.NewHostResolver(storage.db))
 	apmHandler := managerserverapm.NewHandler(apmService, log)
 	agentTraceService := managerbizagenttrace.New(apmTraces)
 	agentTraceHandler := managerserveragenttrace.NewHandler(agentTraceService, log)
