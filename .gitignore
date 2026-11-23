@@ -61,6 +61,14 @@ api/gen/
 /.playwright-cli/
 /output/
 
+# Versioned front-end builds kept locally only for rollback
+# (web/dist-v7, web/dist-v8, web/dist.bak.<tag>-<ts>) — never commit a build
+web/dist-*/
+web/dist.bak.*/
+# Front-end release tarballs uploaded to the production nginx container
+/bigscreen-*.tar.gz
+/ongrid-web-*.tar.gz
+
 # Local dev artifacts (deploy/)
 deploy/docker-compose.override.yml
 deploy/certs/
