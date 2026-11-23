@@ -332,10 +332,11 @@ func (uc *Usecase) InvestigateAsync(incident *alertmodel.Incident) {
 // back to Config defaults. Right now only Locale is plumbed, but the type
 // is here so callers grow it without breaking existing call sites.
 type EnqueueOpts struct {
-	// Locale is the request-context fallback for this run ("en", "zh").
-	// A configured Agent output locale takes precedence. When the Agent
-	// setting is absent, HTTP manual triggers use Accept-Language while
-	// auto-fire / backfill falls back to Config.DefaultLocale.
+	// Locale is the operator UI language for this run ("en", "zh"), read
+	// from Accept-Language on manual triggers. It takes precedence over
+	// the system-wide Agent output locale; headless auto-fire / backfill
+	// passes an empty value and falls back to the configured setting or
+	// Config.DefaultLocale.
 	Locale string
 }
 
@@ -445,6 +446,13 @@ func (uc *Usecase) EnqueueWith(ctx context.Context, incident *alertmodel.Inciden
 }
 
 func (uc *Usecase) resolveLocale(ctx context.Context, requested string) string {
+	// A manual rerun carries the operator's current UI locale; that wins
+	// over the system-wide setting so the report matches what the operator
+	// sees. The setting only governs headless work (auto-fire / backfill),
+	// where requested is empty. See [[feedback_ai_output_locale]].
+	if strings.TrimSpace(requested) != "" {
+		return requested
+	}
 	if uc.locales != nil {
 		locale, found, err := uc.locales.AgentOutputLocale(ctx)
 		if err != nil {
@@ -452,9 +460,6 @@ func (uc *Usecase) resolveLocale(ctx context.Context, requested string) string {
 		} else if found && strings.TrimSpace(locale) != "" {
 			return locale
 		}
-	}
-	if strings.TrimSpace(requested) != "" {
-		return requested
 	}
 	return uc.cfg.DefaultLocale
 }
@@ -610,6 +615,10 @@ func (uc *Usecase) run(reportID string, incident alertmodel.Incident, dedupKeyVa
 		Prompt:      prompt,
 		Background:  false, // sync — this goroutine blocks until terminal
 		SessionKind: "investigation",
+		// Thread the resolved locale into the graph so v2/v3 keep
+		// reinforcing the language on every ReAct turn; the user-prompt
+		// directive alone can drift in long sessions.
+		Locale: locale,
 	})
 	if err != nil {
 		uc.log.Warn("worker spawn failed",

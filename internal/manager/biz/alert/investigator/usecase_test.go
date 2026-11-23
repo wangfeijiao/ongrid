@@ -125,11 +125,17 @@ func TestEnqueue_DisabledByDefault(t *testing.T) {
 	}
 }
 
-func TestResolveLocalePrefersAgentSetting(t *testing.T) {
+// TestResolveLocalePrefersRequestOverAgentSetting — a manual rerun follows
+// the operator's UI locale even when an administrator set a system-wide
+// output language. The system setting only applies to headless runs.
+func TestResolveLocalePrefersRequestOverAgentSetting(t *testing.T) {
 	uc := NewUsecase(&fakeRepo{}, &fakeSpawner{}, nil, Config{DefaultLocale: "en"}, nil).
 		WithLocaleResolver(fakeLocaleResolver{locale: "zh", found: true})
-	if got := uc.resolveLocale(context.Background(), "en"); got != "zh" {
-		t.Fatalf("resolveLocale() = %q, want zh", got)
+	if got := uc.resolveLocale(context.Background(), "en"); got != "en" {
+		t.Fatalf("resolveLocale(requested=en) = %q, want en", got)
+	}
+	if got := uc.resolveLocale(context.Background(), ""); got != "zh" {
+		t.Fatalf("resolveLocale(headless) = %q, want zh from system setting", got)
 	}
 }
 
@@ -266,6 +272,38 @@ func TestEnqueue_HappyPath(t *testing.T) {
 	}
 	if got.FindingsMD != "Root cause: PID 8821 saturated CPU on pg-replica-7.\n\nDetails follow..." {
 		t.Errorf("findings_md mismatch: %q", got.FindingsMD)
+	}
+}
+
+// TestEnqueue_ThreadsLocaleToWorker — the resolved locale reaches the
+// ReAct graph, not just the worker's initial user prompt.
+func TestEnqueue_ThreadsLocaleToWorker(t *testing.T) {
+	repo := &fakeRepo{}
+	spawner := &fakeSpawner{worker: &chatruntime.Worker{ID: "wkr_locale", SessionID: "ses_locale"}}
+	uc := NewUsecase(repo, spawner, nil, Config{Enabled: true, AgentName: "incident-investigator", DefaultLocale: "zh"}, nil)
+	inc := &alertmodel.Incident{
+		ID: 7, Rule: "disk_high", Severity: "critical",
+		FirstFiredAt: time.Now(), LastFiredAt: time.Now(),
+	}
+	uc.EnqueueWith(context.Background(), inc, EnqueueOpts{Locale: "en"})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		spawner.mu.Lock()
+		callCount := len(spawner.calls)
+		spawner.mu.Unlock()
+		if callCount > 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	spawner.mu.Lock()
+	defer spawner.mu.Unlock()
+	if len(spawner.calls) != 1 {
+		t.Fatalf("want 1 spawner call, got %d", len(spawner.calls))
+	}
+	if got := spawner.calls[0].Locale; got != "en" {
+		t.Fatalf("spawn locale = %q, want en", got)
 	}
 }
 

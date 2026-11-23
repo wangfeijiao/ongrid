@@ -61,10 +61,11 @@ func (s *Service) AgentLLMTimeout(ctx context.Context) time.Duration {
 	return d
 }
 
-// AgentOutputLocale returns the live system-wide Agent output language.
-// Missing/empty means the caller should keep its contextual fallback (for
-// example, a manual RCA follows Accept-Language while an automatic RCA uses
-// the deployment default). Values are validated on write.
+// AgentOutputLocale returns the live system-wide Agent output language for
+// headless work (no browser context), such as automatic RCA investigations.
+// Missing/empty means the caller should keep its contextual fallback: a
+// manual RCA follows the operator's Accept-Language, while an automatic RCA
+// uses the deployment default. Values are validated on write.
 func (s *Service) AgentOutputLocale(ctx context.Context) (string, bool, error) {
 	v, found, err := s.Get(ctx, model.CategoryAgent, model.KeyAgentOutputLocale)
 	if err != nil || !found {
