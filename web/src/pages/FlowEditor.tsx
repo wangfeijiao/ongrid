@@ -74,6 +74,7 @@ import { useI18n } from '@/i18n/locale';
 import { useAuth } from '@/store/auth';
 import { toolGroupKey, groupTag, groupTitle, orderedGroupKeys } from '@/lib/toolSkill';
 import { paramDescEn } from '@/lib/paramDescEn';
+import { fixedDateTime } from '@/lib/format';
 
 // ---------- node visual spec ----------------------------------------------
 
@@ -994,31 +995,39 @@ export default function FlowEditorPage() {
           </div>
         )}
 
-        {/* runs drawer */}
+        {/* runs drawer — list and node detail scroll independently so a long run list never pushes the detail off-screen */}
         {showRuns && !selected && (
-          <div className="w-80 shrink-0 overflow-y-auto border-l border-zinc-800 p-3">
-            <div className="mb-2 text-[12px] font-medium uppercase tracking-wide text-zinc-500">{tr('运行记录', 'Runs')}</div>
-            {runs.length === 0 && !activeRun ? (
-              <div className="text-[12px] text-zinc-600">{tr('暂无运行', 'No runs yet')}</div>
-            ) : (
-              <div className="space-y-1.5">
-                {(activeRun && !runs.some((r) => r.id === activeRun.run.id) ? [activeRun.run, ...runs] : runs).map((r) => (
-                  <button
-                    key={r.id}
-                    type="button"
-                    onClick={() => pollRun(r.id)}
-                    className={`flex w-full items-center justify-between rounded-md border px-2.5 py-2 text-left text-[12px] transition-colors ${
-                      activeRun?.run.id === r.id ? 'border-indigo-700 bg-indigo-950/30' : 'border-zinc-800 hover:border-zinc-700'
-                    }`}
-                  >
-                    <span className="font-mono text-zinc-400">{r.id.slice(0, 8)}</span>
-                    <RunStatusChip status={r.status} />
-                  </button>
-                ))}
+          <div className="flex w-80 shrink-0 flex-col overflow-hidden border-l border-zinc-800">
+            <div className="flex max-h-[44%] shrink-0 flex-col overflow-hidden border-b border-zinc-800">
+              <div className="shrink-0 px-3 pb-1.5 pt-3 text-[12px] font-medium uppercase tracking-wide text-zinc-500">{tr('运行记录', 'Runs')}</div>
+              <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3 pb-2">
+                {runs.length === 0 && !activeRun ? (
+                  <div className="text-[12px] text-zinc-600">{tr('暂无运行', 'No runs yet')}</div>
+                ) : (
+                  (activeRun && !runs.some((r) => r.id === activeRun.run.id) ? [activeRun.run, ...runs] : runs).map((r) => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => pollRun(r.id)}
+                      className={`flex w-full flex-col gap-0.5 rounded-md border px-2.5 py-2 text-left text-[12px] transition-colors ${
+                        activeRun?.run.id === r.id ? 'border-indigo-700 bg-indigo-950/30' : 'border-zinc-800 hover:border-zinc-700'
+                      }`}
+                    >
+                      <span className="flex w-full items-center justify-between">
+                        <span className="font-mono text-zinc-400">{r.id.slice(0, 8)}</span>
+                        <RunStatusChip status={r.status} />
+                      </span>
+                      <span className="flex w-full items-center justify-between text-[10px] text-zinc-500">
+                        <span>{fixedDateTime(r.started_at ?? r.created_at)}</span>
+                        <span>{runDurationLabel(r)}</span>
+                      </span>
+                    </button>
+                  ))
+                )}
               </div>
-            )}
+            </div>
             {activeRun && (
-              <div className="mt-3 space-y-1.5">
+              <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-3">
                 <div className="text-[12px] font-medium text-zinc-400">{tr('节点明细', 'Node detail')}</div>
                 {activeRun.nodes.map((n) => (
                   <div key={`${n.node_id}`} className="rounded-md border border-zinc-800 p-2">
@@ -1073,6 +1082,21 @@ export default function FlowEditorPage() {
       </div>
     </main>
   );
+}
+
+// runDurationLabel — elapsed time of a finished run. Backend emits UTC
+// RFC3339 timestamps; Date handles the local-tz conversion for display.
+// Active runs have no finished_at yet, so their duration is left blank
+// (the status chip already shows "running").
+function runDurationLabel(r: FlowRun): string {
+  const start = r.started_at ? new Date(r.started_at).getTime() : NaN;
+  const end = r.finished_at ? new Date(r.finished_at).getTime() : NaN;
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return '';
+  const sec = Math.max(0, Math.round((end - start) / 1000));
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  const rest = sec % 60;
+  return rest ? `${min}m${rest}s` : `${min}m`;
 }
 
 function RunStatusChip({ status }: { status: string }) {
