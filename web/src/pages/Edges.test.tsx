@@ -824,6 +824,41 @@ describe("EdgesPage", () => {
     expect(screen.queryByRole("button", { name: "批量安装设备" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "新建设备" })).not.toBeInTheDocument();
   });
+
+  it("按名称和 IP 过滤设备列表", async () => {
+    render(
+      <MemoryRouter>
+        <EdgesPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("bare-metal-1");
+    const search = screen.getByRole("textbox", { name: "搜索名称 / IP / 主机名…" });
+
+    // 名称命中：只剩 bare-metal-1
+    await userEvent.type(search, "bare-metal");
+    await waitFor(() =>
+      expect(screen.queryByText("k8s:kind-local:ongrid-k8s-control-plane")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("bare-metal-1")).toBeInTheDocument();
+    expect(screen.getByText("匹配 1 / 2 台设备")).toBeInTheDocument();
+
+    // IP 命中：只剩 control-plane
+    await userEvent.clear(search);
+    await userEvent.type(search, "10.0.0.5");
+    await waitFor(() =>
+      expect(screen.queryByText("bare-metal-1")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("k8s:kind-local:ongrid-k8s-control-plane")).toBeInTheDocument();
+
+    // 无匹配时给出空态，且可一键清除（工具栏与空态各有一个按钮）
+    await userEvent.clear(search);
+    await userEvent.type(search, "10.9.9.9");
+    expect(await screen.findByText('没有匹配「10.9.9.9」的设备')).toBeInTheDocument();
+    await userEvent.click(screen.getAllByRole("button", { name: "清除筛选" })[0]);
+    expect(await screen.findByText("bare-metal-1")).toBeInTheDocument();
+    expect(screen.getByText("2 台设备 · 每 10 秒自动刷新")).toBeInTheDocument();
+  });
 });
 
 function LocationProbe() {

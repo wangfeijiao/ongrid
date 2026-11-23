@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import { ChevronDown } from 'lucide-react';
 import { queryApm, serviceParams, type ApmList } from '@/api/apm';
 import { useI18n } from '@/i18n/locale';
-import { SearchInput } from './SearchInput';
+import { SearchInput } from '@/components/ui/SearchInput';
 
 export function ServiceSwitcher({
   params,

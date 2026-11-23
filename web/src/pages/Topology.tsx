@@ -18,6 +18,7 @@ import { Modal } from '@/components/Modal';
 import { Button, Card, EmptyStateCard, PageHeader } from '@/components/ui';
 import { TopologyGraph } from '@/components/topology/Graph';
 import { ApiError } from '@/api/client';
+import { listEdges, type Edge } from '@/api/edges';
 import { useAuth } from '@/store/auth';
 import { useI18n } from '@/i18n/locale';
 import {
@@ -49,6 +50,64 @@ type Tab = 'graph' | 'nodes' | 'relation-types';
 
 const isDomainManagedNodeType = (type: string) => type === 'device' || type === 'cluster';
 const isReportedService = (node: TopologyNode) => node.type === 'service' && node.props?.source === 'apm';
+
+// APM-discovered services are named "<protocol>-<port>" (e.g. postgres-5432),
+// which reads as jargon to non-ops viewers. Turn the well-known ones into a
+// human label while keeping the raw name visible. Unknown names are left as-is.
+const WELL_KNOWN_SERVICE_KINDS: Record<string, [string, string]> = {
+  postgres: ['PostgreSQL 数据库', 'PostgreSQL database'],
+  postgresql: ['PostgreSQL 数据库', 'PostgreSQL database'],
+  mysql: ['MySQL 数据库', 'MySQL database'],
+  mariadb: ['MariaDB 数据库', 'MariaDB database'],
+  redis: ['Redis 缓存', 'Redis cache'],
+  mongodb: ['MongoDB 数据库', 'MongoDB database'],
+  mongo: ['MongoDB 数据库', 'MongoDB database'],
+  nginx: ['Nginx 网关', 'Nginx gateway'],
+  kafka: ['Kafka 消息队列', 'Kafka message queue'],
+  elasticsearch: ['Elasticsearch 检索', 'Elasticsearch search'],
+  rabbitmq: ['RabbitMQ 消息队列', 'RabbitMQ message queue'],
+};
+function describeServiceName(raw: string, tr: (zh: string, en: string) => string): string {
+  const base = String(raw ?? '').split(':')[0].split('-')[0].toLowerCase();
+  const kind = WELL_KNOWN_SERVICE_KINDS[base];
+  if (!kind) return raw;
+  const portMatch = String(raw).match(/[-:](\d{2,5})$/);
+  const port = portMatch ? ` · ${portMatch[1]}` : '';
+  return `${tr(kind[0], kind[1])}${port}（${raw}）`;
+}
+
+// Turn a relation's target into an operator-friendly label. Telemetry-reported
+// device nodes carry raw instance ids / bare IPs as their name; the edges API
+// has the human name (device_name -> name -> host_info.hostname). Prefer that,
+// and fall back to the topology node name when no edge is linked.
+function resolveNeighborLabel(
+  rel: TopologyRelation,
+  centerID: number,
+  otherNode: TopologyNode | undefined,
+  deviceById: Map<number, Edge>,
+  tr: (zh: string, en: string) => string,
+): string {
+  const otherID = rel.src_id === centerID ? rel.dst_id : rel.src_id;
+  if (otherNode?.type === 'device') {
+    const edge = deviceById.get(otherID);
+    if (edge) {
+      const host = edge.host_info && typeof edge.host_info === 'object' ? edge.host_info : {};
+      const hostname = typeof host.hostname === 'string' ? host.hostname : '';
+      const label = edge.name || edge.device_name || hostname || otherNode.name;
+      const bits: string[] = [];
+      if (edge.device_name && edge.device_name !== label) bits.push(edge.device_name);
+      if (hostname && hostname !== label && hostname !== edge.device_name) bits.push(hostname);
+      if (Array.isArray(edge.roles) && edge.roles.length > 0) bits.push(edge.roles.join('/'));
+      return bits.length ? `${label}（${bits.join(' · ')}）` : label;
+    }
+    const did = Number(rel.props?.device_id);
+    if (Number.isFinite(did)) {
+      const edge = deviceById.get(did);
+      if (edge?.name) return edge.name;
+    }
+  }
+  return otherNode?.name ?? `${tr('节点', 'node')} #${otherID}`;
+}
 
 export default function TopologyPage() {
   const role = useAuth((s) => s.role);
@@ -361,8 +420,28 @@ function NodeDetailDrawer({
   const [err, setErr] = useState<string | null>(null);
   const [addingRelation, setAddingRelation] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [deviceById, setDeviceById] = useState<Map<number, Edge>>(new Map());
   const reportedService = isReportedService(node);
   const domainManaged = isDomainManagedNodeType(node.type) || reportedService;
+
+  // Operator-facing machine names live in the edges API, not in topology
+  // node.props (those hold raw instance ids / bare IPs). Load once per drawer
+  // so relation rows and the detail header can show "srv-10-7-30-96" instead
+  // of "i-8q5r725p". Failure is non-fatal: we fall back to the node name.
+  useEffect(() => {
+    let cancelled = false;
+    listEdges()
+      .then((r) => {
+        if (cancelled) return;
+        const m = new Map<number, Edge>();
+        for (const e of r.items ?? []) {
+          if (typeof e.device_id === 'number') m.set(e.device_id, e);
+        }
+        setDeviceById(m);
+      })
+      .catch(() => { if (!cancelled) setDeviceById(new Map()); });
+    return () => { cancelled = true; };
+  }, []);
 
   const fetchNeighbors = useCallback(async () => {
     setLoading(true);
@@ -418,7 +497,9 @@ function NodeDetailDrawer({
     <>{dialog}<aside className="flex w-96 shrink-0 flex-col border-l border-zinc-800/60 bg-zinc-950/40">
       <div className="flex items-start justify-between gap-2 border-b border-zinc-800/60 px-4 py-3">
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-zinc-100">{node.name}</div>
+          <div className="truncate text-sm font-semibold text-zinc-100">
+            {reportedService ? describeServiceName(node.name, tr) : node.name}
+          </div>
           <div className="mt-0.5 text-[11px] text-zinc-500">
             <span className="rounded bg-zinc-800 px-1 py-0.5 font-mono">{node.type}</span>
             <span className="ml-1.5">#{node.id}</span>
@@ -448,9 +529,32 @@ function NodeDetailDrawer({
             <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500">
               {tr('属性', 'Props')}
             </div>
-            <pre className="overflow-auto rounded-md border border-zinc-800 bg-zinc-900/40 p-2 text-[11px] text-zinc-300">
-              {JSON.stringify(node.props, null, 2)}
-            </pre>
+            <dl className="divide-y divide-zinc-800/70 overflow-hidden rounded-md border border-zinc-800 bg-zinc-900/40 text-[11px]">
+              {Object.entries(node.props).map(([key, value]) => {
+                let shown: string;
+                if (value === '' || value === null || value === undefined) {
+                  shown = tr('未设置', 'not set');
+                } else if (key === 'service_name' && reportedService) {
+                  shown = describeServiceName(String(value), tr);
+                } else if (typeof value === 'object') {
+                  shown = JSON.stringify(value);
+                } else {
+                  shown = String(value);
+                }
+                return (
+                  <div key={key} className="flex gap-3 px-2.5 py-2">
+                    <dt className="w-28 shrink-0 text-zinc-500">{key.replace(/_/g, ' ')}</dt>
+                    <dd className="min-w-0 flex-1 break-words font-mono text-zinc-200">{shown}</dd>
+                  </div>
+                );
+              })}
+            </dl>
+          </div>
+        )}
+        {node.type === 'device' && deviceById.has(node.id) && (
+          <div className="mb-4 rounded-md border border-zinc-800 bg-zinc-900/40 px-2.5 py-2 text-[11px]">
+            <span className="text-zinc-500">{tr('机器名', 'Machine')}：</span>
+            <span className="font-mono text-zinc-200">{deviceById.get(node.id)?.name}</span>
           </div>
         )}
         <div className="mb-1.5 flex items-center justify-between">
@@ -486,6 +590,7 @@ function NodeDetailDrawer({
                 rel={rel}
                 centerNode={node}
                 otherNode={nodeMap.get(rel.src_id === node.id ? rel.dst_id : rel.src_id)}
+                deviceById={deviceById}
                 isAdmin={isAdmin}
                 onDeleted={fetchNeighbors}
               />
@@ -530,12 +635,14 @@ function NeighborRow({
   rel,
   centerNode,
   otherNode,
+  deviceById,
   isAdmin,
   onDeleted,
 }: {
   rel: TopologyRelation;
   centerNode: TopologyNode;
   otherNode: TopologyNode | undefined;
+  deviceById: Map<number, Edge>;
   isAdmin: boolean;
   onDeleted: () => void;
 }) {
@@ -565,10 +672,10 @@ function NeighborRow({
       <div className="flex items-center gap-2 text-[11px]">
         <span className="font-mono text-zinc-500">{arrow}</span>
         <span className="rounded bg-zinc-800 px-1 py-0.5 font-mono text-zinc-300">{rel.type}</span>
-        <span className="min-w-0 flex-1 truncate text-zinc-200">
-          {otherNode?.name ?? `node #${otherID}`}
+        <span className="min-w-0 flex-1 truncate text-zinc-200" title={resolveNeighborLabel(rel, centerID, otherNode, deviceById, tr)}>
+          {resolveNeighborLabel(rel, centerID, otherNode, deviceById, tr)}
           {otherNode && (
-            <span className="ml-1 text-zinc-500">[{otherNode.type}]</span>
+            <span className="ml-1 text-zinc-500">[{otherNode.type === 'device' ? tr('服务器', 'server') : otherNode.type}]</span>
           )}
         </span>
         {managed && (

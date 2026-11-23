@@ -28,11 +28,18 @@ export function saveRepositoryBinding(identity: ServiceIdentity, binding: Pick<R
 export function deleteRepositoryBinding(identity: ServiceIdentity) {
   return request('DELETE', bindingURL(identity));
 }
+export type ApmHost = {
+  device_id: string;
+  name?: string;
+  hostname?: string;
+  ip?: string;
+};
 export type ApmSummary = {
   metric_source?: string;
   identity: ServiceIdentity;
   operation?: string;
   languages?: string[];
+  hosts?: ApmHost[];
   rps: number | null;
   error_rate: number | null;
   p50_ms: number | null;
