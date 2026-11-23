@@ -142,6 +142,29 @@ describe('Application performance', () => {
     await waitFor(() => expect(queries.at(-1)?.has('device_id')).toBe(false));
     expect(queries.at(-1)?.get('cluster_node_id')).toBe('7');
   });
+  it('shows device IP in the filter and lets operators search by IP', async () => {
+    const queries: URLSearchParams[] = [];
+    server.use(
+      http.get('/api/v1/devices', () => HttpResponse.json({ items: [
+        { id: 42, name: 'ubuntu', ip_address: '10.7.30.42' },
+        { id: 43, name: 'node', ip_address: '10.7.30.43' },
+      ] })),
+      http.get('/api/v1/apm/services', ({ request }) => {
+        queries.push(new URL(request.url).searchParams);
+        return HttpResponse.json({ data: { items: [row], total: 1, page: 1, page_size: 25 } });
+      }),
+    );
+    render(<MemoryRouter initialEntries={[`/apm?${period}`]}><ApmPage /></MemoryRouter>);
+    await screen.findByRole('link', { name: 'orders' });
+    const trigger = screen.getByRole('combobox', { name: '设备' });
+    await act(async () => { await userEvent.click(trigger); });
+    expect(await screen.findByRole('option', { name: 'ubuntu · 10.7.30.42 (#42)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'node · 10.7.30.43 (#43)' })).toBeInTheDocument();
+    const search = screen.getByRole('combobox', { name: '搜索 设备' });
+    await act(async () => { await userEvent.type(search, '10.7.30.43'); });
+    await act(async () => { await userEvent.click(screen.getByRole('option', { name: 'node · 10.7.30.43 (#43)' })); });
+    await waitFor(() => expect(queries.at(-1)?.get('device_id')).toBe('43'));
+  });
   beforeEach(() => { localStorage.setItem('ongrid-locale', 'zh-CN'); server.use(http.get('/api/v1/devices', () => HttpResponse.json({ items: [{ id: 42, name: 'ubuntu' }] })), http.get('/api/v1/topology/nodes', () => HttpResponse.json({ items: [{ id: 7, name: 'production' }] })), http.get('/api/v1/apm/repository-binding', () => HttpResponse.json({ data: null })), http.get('/api/v1/traces/search', () => HttpResponse.json({ traces: [] })), http.get('/api/v1/apm/runtime', () => HttpResponse.json({ data: { items: [], instances: [] } })), http.get('/api/v1/apm/instances', () => HttpResponse.json({ data: { items: [], instances: [] } }))); });
   it('keeps same-name services separate and links their complete identity', async () => {
     server.use(
@@ -471,9 +494,9 @@ describe('Application performance', () => {
     expect(listURL?.searchParams.get('protocol')).toBe('all');
     expect(screen.getAllByRole('link', { name: 'orders' })).toHaveLength(1);
     expect(screen.getByRole('link', { name: 'rpc-only' })).toBeInTheDocument();
-    const mixedLatency = within(screen.getByRole('link', { name: 'orders' }).closest('tr')!).getAllByRole('cell')[5];
+    const mixedLatency = within(screen.getByRole('link', { name: 'orders' }).closest('tr')!).getAllByRole('cell')[6];
     expect(mixedLatency).toHaveTextContent('HTTP800RPC12');
-    const rpcLatency = within(screen.getByRole('link', { name: 'rpc-only' }).closest('tr')!).getAllByRole('cell')[5];
+    const rpcLatency = within(screen.getByRole('link', { name: 'rpc-only' }).closest('tr')!).getAllByRole('cell')[6];
     expect(rpcLatency).toHaveTextContent('RPC12');
     expect(rpcLatency).not.toHaveTextContent('HTTP');
     expect(screen.queryByRole('columnheader', { name: '协议' })).not.toBeInTheDocument();
@@ -892,6 +915,37 @@ describe('Service resource scope', () => {
     const traces = new URL(screen.getByRole('link', {name: '查看链路'}).getAttribute('href')!, 'https://ongrid.test');
     expect(traces.searchParams.get('q')).toContain('resource.service.version = "1.1.0-demo"');
     expect(traces.searchParams.get('q')).toContain('resource.service.instance.id = "pod-2"');
+  });
+
+  it('shows the server column with host addresses and aggregates multi-host services', async () => {
+    server.use(
+      http.get('/api/v1/apm/services', () => HttpResponse.json({
+        data: {
+          items: [{
+            ...row,
+            hosts: [
+              { device_id: '39', name: 'i-wi6bxudb', hostname: 'i-wi6bxudb', ip: '10.7.30.92' },
+              { device_id: '47', name: 'i-qdghyr5u', hostname: 'i-qdghyr5u', ip: '10.7.30.102' },
+            ],
+          }],
+          total: 1,
+          page: 1,
+          page_size: 25,
+        },
+      })),
+      http.get('/api/v1/apm/overview', () => HttpResponse.json({ data: { summary: row, points: [] } })),
+      http.get('/api/v1/apm/operations', () => HttpResponse.json({ data: { items: [], total: 0, page: 1, page_size: 5 } })),
+    );
+    render(
+      <MemoryRouter initialEntries={[`/apm?${period}`]}>
+        <ApmPage />
+      </MemoryRouter>,
+    );
+    await screen.findByRole('link', { name: 'orders' });
+    expect(screen.getByRole('columnheader', { name: '服务器' })).toBeInTheDocument();
+    const cells = within(screen.getByRole('link', { name: 'orders' }).closest('tr')!).getAllByRole('cell');
+    expect(cells[3]).toHaveTextContent('10.7.30.92');
+    expect(cells[3]).toHaveTextContent('+1');
   });
 
 });
