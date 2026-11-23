@@ -375,7 +375,7 @@ const BUILTIN_RULE_NAMES: Record<string, { zh: string; en: string }> = {
   prom_ingest_fail: { zh: 'Prom 写入失败', en: 'Prom write failure' },
   disk_full_warning: { zh: '磁盘使用率 > 85%', en: 'Disk usage > 85%' },
   cpu_high_default: { zh: 'CPU 高负载（PromQL）', en: 'CPU high load (PromQL)' },
-  swap_high: { zh: 'Swap 使用率 > 50%', en: 'Swap usage > 50%' },
+  swap_high: { zh: 'Swap 使用率 > 90%', en: 'Swap usage > 90%' },
   fd_exhaustion: { zh: '文件描述符接近耗尽（>85%）', en: 'File descriptors near exhaustion (>85%)' },
 };
 
@@ -388,6 +388,18 @@ const BUILTIN_RULE_NAMES: Record<string, { zh: string; en: string }> = {
 export function localizedRuleName(rule_key: string, name: string): string {
   const m = BUILTIN_RULE_NAMES[rule_key];
   if (!m) return name;
+  // The seed names in this table carry a threshold (e.g. "Swap 使用率 > 50%")
+  // and go stale as soon as the operator edits the rule in the UI. When the
+  // backend name carries its own percentage, adopt that number so the list
+  // and detail pages track the live threshold without a code change.
+  const livePct = /([\d.]+)\s*%/.exec(name || '');
+  const seedPct = /([\d.]+)\s*%/.exec(m.zh);
+  if (livePct && seedPct && livePct[1] !== seedPct[1]) {
+    return trInline(
+      m.zh.replace(seedPct[1], livePct[1]),
+      m.en.replace(seedPct[1], livePct[1]),
+    );
+  }
   return trInline(m.zh, m.en);
 }
 
