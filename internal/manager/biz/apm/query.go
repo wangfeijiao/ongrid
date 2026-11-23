@@ -223,6 +223,10 @@ type Summary struct {
 	DataStatus   string            `json:"data_status"`
 	Protocols    []ProtocolMetrics `json:"protocols,omitempty"`
 	Languages    []string          `json:"languages,omitempty"`
+	// Hosts lists the devices this identity was observed on for the queried
+	// window. Empty when host attribution is not wired or the metric source
+	// carries no device_id.
+	Hosts []HostRef `json:"hosts,omitempty"`
 }
 
 type Metadata struct {
