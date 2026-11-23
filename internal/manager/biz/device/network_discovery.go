@@ -507,10 +507,23 @@ func networkProfileFromCandidate(candidate *model.NetworkDiscoveryCandidate) (*m
 	if strong != "" {
 		fingerprint = "network-identity:" + normalizeID(strong)
 	}
+	vendor, modelName := firstNonEmpty(source["vendor"]), firstNonEmpty(source["model"])
+	// OPT-012: derive vendor/model from SNMP sysDescr/sysObjectID when the
+	// stronger identity sources did not carry them. Never overwrite a value
+	// that came from an explicit vendor field.
+	if vendor == "" || modelName == "" {
+		parsedVendor, parsedModel := ParseVendorModel(source["sys_description"], source["sys_object_id"])
+		if vendor == "" {
+			vendor = parsedVendor
+		}
+		if modelName == "" {
+			modelName = parsedModel
+		}
+	}
 	return &model.DeviceNetwork{
 		DeviceKind:         "network",
-		Vendor:             source["vendor"],
-		Model:              source["model"],
+		Vendor:             vendor,
+		Model:              modelName,
 		SerialNumber:       source["serial_number"],
 		ManagementAddress:  candidate.IPAddress,
 		SysName:            source["sys_name"],
@@ -645,6 +658,22 @@ func networkCandidateFromReport(edgeID uint64, report tunnel.NetworkDiscoveryCan
 			sourceData[key] = strings.TrimSpace(value)
 		}
 	}
+	// OPT-010: 把本次观察者的证据写成单元素数组，store 层 upsert 时按
+	// observer 合并。字段用 map[string]string，便于前端与查询直接读取。
+	observerEvidence := map[string]string{
+		"observer_edge_id": fmt.Sprintf("%d", edgeID),
+		"ip_address":       ip,
+		"interface_name":   interfaceName,
+		"source":           strings.TrimSpace(report.Source),
+		"confidence":       fmt.Sprintf("%d", confidence),
+		"sys_name":         strings.TrimSpace(report.SysName),
+		"lldp_chassis_id":  strings.TrimSpace(report.LLDPChassisID),
+		"snmp_engine_id":   strings.TrimSpace(report.SNMPEngineID),
+		"observed_at":      now.UTC().Format(time.RFC3339),
+	}
+	if evidenceJSON, e := json.Marshal([]map[string]string{observerEvidence}); e == nil {
+		sourceData["_observers"] = string(evidenceJSON)
+	}
 	sourceDataJSON, err := json.Marshal(sourceData)
 	if err != nil {
 		return nil, false, fmt.Errorf("encode network discovery source data: %w", err)
@@ -658,11 +687,16 @@ func networkCandidateFromReport(edgeID uint64, report tunnel.NetworkDiscoveryCan
 		return nil, false, fmt.Errorf("encode network discovery links: %w", err)
 	}
 
+	// OPT-010: 去重按设备物理身份（MAC）跨观察者全局聚合。同一台设备被多台
+	// Edge 观察到时只保留一条候选，各观察者的证据由 store 层合并进
+	// source_data_json 的 _observers 数组。无 MAC 时回退到规范化 IP。
 	identityPart := mac
+	keyPrefix := "mac:"
 	if identityPart == "" {
 		identityPart = ip
+		keyPrefix = "ip:"
 	}
-	key := fmt.Sprintf("edge:%d:%s:%s", edgeID, identityPart, interfaceName)
+	key := keyPrefix + identityPart
 	return &model.NetworkDiscoveryCandidate{
 		ObserverEdgeID: edgeID,
 		ObservationKey: key,
