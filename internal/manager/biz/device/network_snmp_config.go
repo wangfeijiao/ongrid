@@ -276,7 +276,11 @@ func (u *NetworkDiscoveryUsecase) CreateNetworkSNMP(ctx context.Context, in Netw
 	name := firstNonEmpty(response.SysName, address)
 	seed := &model.Device{Fingerprint: fingerprint, Name: name, Hostname: name, OS: "network", Arch: "network", IPAddress: address, Roles: model.RoleBitNetwork}
 	now := time.Now().UTC()
+	// OPT-012: derive vendor/model from the SNMP probe result so a manually
+	// configured device shows its hardware identity like a discovered one.
+	vendor, modelName := ParseVendorModel(response.SysDescription, response.SysObjectID)
 	profile := &model.DeviceNetwork{DeviceKind: "network", ManagementAddress: address, SysName: response.SysName, SysDescription: response.SysDescription, SnmpEngineID: response.SNMPEngineID,
+		Vendor: vendor, Model: modelName,
 		PollEnabled: in.Enabled, PollScannerHostDeviceID: in.ScannerHostDeviceID, PollCredentialName: in.CredentialName, PollPort: in.Port, PollIntervalSeconds: in.IntervalSeconds,
 		ReachabilityStatus: "reachable", LastReachableAt: &now, LastPollAt: &now}
 	detail, err := u.promotion.CreateSNMPDevice(ctx, seed, profile, networkInterfacesFromReports(0, response.Interfaces, now))
