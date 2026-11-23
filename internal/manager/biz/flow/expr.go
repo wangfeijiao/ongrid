@@ -93,9 +93,16 @@ func (c *RunContext) ResolveValue(v any) (any, error) {
 
 // lookup resolves a dotted path rooted at trigger / nodes / vars.
 // nodes.<id>.output.<rest> reads into that node's data output.
+//
+// soft (trigger only): the trigger payload is external input whose shape
+// varies by source (manual runs carry no payload at all; alert/cron payloads
+// differ). A missing/ill-typed trigger field therefore renders as an empty
+// string instead of failing the whole run. nodes.* and vars.* stay STRICT —
+// a miss there means a broken wire or a typo and must surface as an error.
 func (c *RunContext) lookup(path string) (any, error) {
 	parts := strings.Split(path, ".")
 	var cur any
+	soft := parts[0] == "trigger"
 	switch parts[0] {
 	case "trigger":
 		cur = anyMap(c.Trigger)
@@ -125,19 +132,31 @@ func (c *RunContext) lookup(path string) (any, error) {
 		if key != "" {
 			m, ok := cur.(map[string]any)
 			if !ok {
+				if soft {
+					return "", nil
+				}
 				return nil, fmt.Errorf("expr: %q — %q is not an object", path, key)
 			}
 			cur, ok = m[key]
 			if !ok {
+				if soft {
+					return "", nil
+				}
 				return nil, fmt.Errorf("expr: %q — field %q missing", path, key)
 			}
 		}
 		for _, idx := range idxs {
 			arr, ok := cur.([]any)
 			if !ok {
+				if soft {
+					return "", nil
+				}
 				return nil, fmt.Errorf("expr: %q — [%d] applied to non-array", path, idx)
 			}
 			if idx < 0 || idx >= len(arr) {
+				if soft {
+					return "", nil
+				}
 				return nil, fmt.Errorf("expr: %q — index %d out of range (len %d)", path, idx, len(arr))
 			}
 			cur = arr[idx]
