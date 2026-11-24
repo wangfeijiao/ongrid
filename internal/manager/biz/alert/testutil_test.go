@@ -364,11 +364,12 @@ func (r *fakeRepo) ReopenIncident(_ context.Context, id uint64, firedAt time.Tim
 		return errs.ErrNotFound
 	}
 	i.Status = model.IncidentStatusOpen
+	i.FirstFiredAt = firedAt
 	i.LastFiredAt = firedAt
 	i.SilencedUntil = nil
 	i.ResolvedAt = nil
 	i.ResolvedBy = nil
-	i.EventCount++
+	i.EventCount = 1
 	i.Summary = summary
 	i.Value = value
 	i.Threshold = threshold

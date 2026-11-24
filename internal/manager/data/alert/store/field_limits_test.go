@@ -221,7 +221,10 @@ func TestPipelineLongLabelsLifecycle(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, model.IncidentStatusOpen, got.Status)
 				require.Equal(t, in.DedupeKey, got.DedupeKey)
-				require.EqualValues(t, 3, got.EventCount)
+				// A reopen starts a new fault episode: ReopenIncident resets
+				// first_fired_at and event_count to this re-firing, so a flapping
+				// alert stops reporting the timestamp of its very first creation.
+				require.EqualValues(t, 1, got.EventCount)
 			}
 		})
 	}

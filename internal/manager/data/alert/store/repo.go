@@ -217,17 +217,23 @@ func (r *Repo) BumpIncidentFiring(ctx context.Context, id uint64, firedAt time.T
 
 // ReopenIncident transitions a resolved incident back to open and clears the
 // resolved_at / resolved_by columns. Used when a re-firing arrives for a
-// previously resolved incident with the same dedupe_key. It also refreshes
-// summary/value/threshold from the latest firing so the reopened incident
-// reflects the current rule rather than the content frozen at first creation.
+// previously resolved incident with the same dedupe_key. A reopen starts a new
+// fault episode, so first_fired_at and event_count are reset to this firing:
+// otherwise an intermittent alert (e.g. a device that flaps offline/online)
+// keeps reporting the timestamp and firing count from its very first creation,
+// which makes a 4-day outage look like it has been open for weeks. It also
+// refreshes summary/value/threshold from the latest firing so the reopened
+// incident reflects the current rule rather than the content frozen at first
+// creation.
 func (r *Repo) ReopenIncident(ctx context.Context, id uint64, firedAt time.Time, summary string, value, threshold *float64) error {
 	if firedAt.IsZero() {
 		firedAt = time.Now().UTC()
 	}
 	res := dbx.WithContext(ctx, r.db).Model(&model.Incident{}).Where("id = ?", id).Updates(map[string]any{
 		"status":         model.StatusOpen,
+		"first_fired_at": firedAt,
 		"last_fired_at":  firedAt,
-		"event_count":    gorm.Expr("event_count + ?", 1),
+		"event_count":    1,
 		"silenced_until": nil,
 		"resolved_at":    nil,
 		"resolved_by":    nil,
