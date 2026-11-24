@@ -13,13 +13,15 @@ type Props = {
   edgeId: number;
  deviceId?: number;
   deviceName: string;
+  /** Preferred host discriminator for auto-generated service names; falls back to the device ID. */
+  deviceIp?: string;
   online: boolean;
   row: PluginRow;
   canEdit?: boolean;
   onSave(body: { enabled: boolean; spec?: Record<string, unknown> }): Promise<PluginRow | void>;
 };
 
-export function AutoAPMCard({ edgeId, deviceId, deviceName, online, row, canEdit = true, onSave }: Props) {
+export function AutoAPMCard({ edgeId, deviceId, deviceName, deviceIp, online, row, canEdit = true, onSave }: Props) {
   const { tr } = useI18n();
   const { options, error: optionsError } = useAutoAPMOptions();
   const [spec, setSpec] = useState<Spec>(() => row.spec ?? {});
@@ -51,6 +53,26 @@ export function AutoAPMCard({ edgeId, deviceId, deviceName, online, row, canEdit
   const defaultEnvironment = row.defaults ? row.defaults.environment || '' : spec.environment || '';
   const environmentOptions = [...new Set([...options.environments, defaultEnvironment, ...targets.map(target => target.environment ?? '')])].filter(Boolean).sort();
   const namespaceOptions = [...new Set([...options.namespaces, ...targets.map(target => target.service_namespace ?? '')])].filter(Boolean).sort();
+  // APM identifies a service by name alone, so a generic default such as
+  // "java-8080" merges unrelated applications running on different hosts.
+  // Scope the generated name to this host once the plain name is taken. The IP
+  // is the discriminator because device names are not unique.
+  const deviceTag = (deviceIp ?? '').trim() || (deviceId ? `dev${deviceId}` : '');
+  const hostScopedName = (base: string) => (deviceTag ? `${base}@${deviceTag}` : base);
+  // Reusing a generic name such as "java-8080" on another host merges unrelated
+  // applications into a single service, with combined traffic, P95 and errors.
+  // Count the hosts already using a name so the editor can warn before the same
+  // mistake is repeated.
+  const otherHostsUsing = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return 0;
+    const hosts = options.service_names?.[trimmed] ?? 0;
+    // The count is per device, so drop this device whenever any of its saved
+    // targets already carries the name, including the one being edited.
+    const usedOnThisDevice = targets.some(target => target.service_name.trim() === trimmed);
+    return Math.max(0, hosts - (usedOnThisDevice ? 1 : 0));
+  };
+  const nameConflict = editor ? otherHostsUsing(editor.target.service_name) : 0;
   const fresh = online && !!health?.reported_at && checkedAt - Date.parse(health.reported_at) <= 90000;
   const processes = groupDiscoveredProcesses(fresh ? health?.candidates : []);
   const candidates = processes.filter(candidate => !targets.some((target, index) => index !== editor?.index && matchesProcess(target, candidate)));
@@ -120,8 +142,15 @@ export function AutoAPMCard({ edgeId, deviceId, deviceName, online, row, canEdit
             {!fresh ? <EmptyState className="flex flex-col items-center gap-2 px-5 py-8 text-center" title={tr('等待设备上报发现结果', 'Waiting for discovery results')} hint={tr('设备在线并上报后，即可选择要采集的进程。', 'Select a process after the device connects and reports its inventory.')} />
               : !availableCandidates.length ? <EmptyState className="flex flex-col items-center gap-2 px-5 py-8 text-center" title={query ? tr('没有匹配的进程', 'No matching processes') : tr('暂无可添加的进程', 'No processes available to add')} hint={query ? tr('尝试其他进程名称或端口。', 'Try another process name or port.') : tr('已配置的进程不会重复显示，新发现的应用进程会自动出现在这里。', 'Configured processes are excluded. Newly discovered application processes appear here automatically.')} />
               : <div role="radiogroup" aria-label={tr('发现的进程', 'Discovered processes')}>{availableCandidates.map(candidate => <label className="og-choice-row" key={`${candidate.executable}:${candidate.pid}:${candidate.ports[0]}`}>
-                <Radio name="capture-process" aria-label={tr(`选择 ${candidate.executable}:${candidate.ports.join(', ')}`, `Select ${candidate.executable}:${candidate.ports.join(', ')}`)} disabled={saving} checked={matchesProcess(editor.target, candidate)} onChange={() => patch({ executable: candidate.executable, port: candidate.ports[0], service_name: candidate.executable.split('/').pop() ?? '' })} />
-                <span className="min-w-0 flex-1"><span className="flex flex-wrap items-baseline gap-2"><span className="font-medium text-text">{candidate.executable.split('/').pop()}</span>{candidate.pid > 0 && <span className="font-mono text-xs text-text-faint">PID {candidate.pid}</span>}</span><span className="mt-0.5 block break-all font-mono text-xs text-text-muted">{candidate.executable}</span></span><span className="max-w-[40%] break-words text-right font-mono text-xs text-text-muted">:{candidate.ports.join(', ')}</span>
+                <Radio name="capture-process" aria-label={tr(`选择 ${candidate.executable}:${candidate.ports.join(', ')}`, `Select ${candidate.executable}:${candidate.ports.join(', ')}`)} disabled={saving} checked={matchesProcess(editor.target, candidate)} onChange={() => {
+                  const baseName = candidate.executable.split('/').pop() ?? '';
+                  // Scope the name to this host when the plain name is already
+                  // claimed elsewhere. Merging unrelated applications is the
+                  // more expensive mistake, and sharing a service across hosts
+                  // stays possible by editing the name back.
+                  patch({ executable: candidate.executable, port: candidate.ports[0], service_name: otherHostsUsing(baseName) > 0 ? hostScopedName(baseName) : baseName });
+                }} />
+                <span className="min-w-0 flex-1"><span className="flex flex-wrap items-baseline gap-2"><span className="font-medium text-text">{candidate.executable.split('/').pop()}</span>{candidate.pid > 0 && <span className="font-mono text-xs text-text-faint">PID {candidate.pid}</span>}{otherHostsUsing(candidate.executable.split('/').pop() ?? '') > 0 && <span className="text-xs text-amber-600">{tr(`同名已在 ${otherHostsUsing(candidate.executable.split('/').pop() ?? '')} 台设备使用`, `Name used on ${otherHostsUsing(candidate.executable.split('/').pop() ?? '')} other device(s)`)}</span>}</span><span className="mt-0.5 block break-all font-mono text-xs text-text-muted">{candidate.executable}</span></span><span className="max-w-[40%] break-words text-right font-mono text-xs text-text-muted">:{candidate.ports.join(', ')}</span>
               </label>)}</div>}
 
           </div>
@@ -131,13 +160,16 @@ export function AutoAPMCard({ edgeId, deviceId, deviceName, online, row, canEdit
         {editor.target.executable && <div className="space-y-4 border-t border-border pt-4">
         <div><h3 className="text-sm font-medium text-text">{tr('服务信息', 'Service details')}</h3><p className="mt-1 flex items-start gap-1.5 break-all text-xs text-text-muted"><Check size={13} aria-hidden="true" className="mt-0.5 shrink-0" /><span className="font-mono">{editor.target.executable}:{targetPorts(editor.target)}</span></p></div>
         <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="autoapm-name">{tr('服务名称', 'Service name')}</Label><Input autoFocus={editor.index >= 0} id="autoapm-name" className="w-full" required maxLength={256} disabled={saving} value={editor.target.service_name} onChange={e => patch({ service_name: e.target.value })} /></div>
+          <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="autoapm-name">{tr('服务名称', 'Service name')}</Label><Input autoFocus={editor.index >= 0} id="autoapm-name" className="w-full" required maxLength={256} disabled={saving} value={editor.target.service_name} onChange={e => patch({ service_name: e.target.value })} />
+            {nameConflict > 0 && <p role="status" className="text-xs text-amber-600">{tr(`该名称已被另外 ${nameConflict} 台设备使用。若它们是同一服务的多个副本可以继续；若是不同业务系统，请改用能区分的业务名称（例如 order-api），否则平台会把它们合并成一个服务，请求量、P95 和错误率都会混算。`, `This name is already used by ${nameConflict} other device(s). Continue only when they are replicas of the same service; otherwise use a distinct business name (for example order-api), or the platform merges them into one service with combined traffic, P95 and errors.`)}</p>}
+            {deviceTag && editor.target.service_name.trim().endsWith(`@${deviceTag}`) && <p role="status" className="text-xs text-text-muted">{tr(`名称含本机标识 ${deviceTag}，不会与其它设备上的同名服务合并；若确认它们是同一服务的多个副本，删掉该标识即可合并。`, `The name carries this host tag (${deviceTag}), so it stays separate from same-named services on other hosts. Remove the tag to merge genuine replicas.`)}</p>}
+          </div>
           <div className="space-y-1.5"><Label htmlFor="autoapm-namespace">{tr('服务命名空间', 'Service namespace')}</Label><Autocomplete id="autoapm-namespace" aria-label={tr('服务命名空间', 'Service namespace')} options={namespaceOptions} className="w-full" maxLength={256} disabled={saving} value={editor.target.service_namespace ?? ''} placeholder={tr('选择或输入', 'Choose or type')} onValueChange={value => patch({ service_namespace: value })} /></div>
           <div className="space-y-1.5"><Label htmlFor="autoapm-environment">{tr('服务环境', 'Service environment')}</Label><Autocomplete id="autoapm-environment" aria-label={tr('服务环境', 'Service environment')} options={environmentOptions} className="w-full" maxLength={256} disabled={saving} value={editor.target.environment ?? ''} placeholder={defaultEnvironment ? tr(`继承：${defaultEnvironment}`, `Inherit: ${defaultEnvironment}`) : tr('选择或输入', 'Choose or type')} onValueChange={value => patch({ environment: value })} />{editor.target.environment && <Button size="sm" variant="link" disabled={saving} onClick={() => patch({ environment: '' })}>{tr('恢复继承', 'Use default')}</Button>}</div>
           <div className="space-y-1.5 border-t border-border pt-4 sm:col-span-2"><Label htmlFor="autoapm-log"><FileText size={13} aria-hidden="true" className="mr-1.5 inline" />{tr('日志路径（可选）', 'Log path (optional)')}</Label><Input id="autoapm-log" className="w-full font-mono" maxLength={4096} disabled={saving} value={editor.target.log_path ?? ''} placeholder="/var/log/orders/*.log" onChange={e => patch({ log_path: e.target.value })} /><p className="text-xs text-text-muted">{tr('支持绝对路径和通配符，留空不采集该服务的文件日志。', 'Use an absolute path or glob. Leave empty to skip service file logs.')}</p></div>
         </div>
         </div>}
-        {optionsError && <p role="status" className="text-xs text-amber-600">{tr('已有属性加载失败，仍可手动输入。', 'Could not load saved values. You can still type new ones.')}</p>}
+        {optionsError && <p role="status" className="text-xs text-amber-600">{tr('已有属性加载失败，仍可手动输入；服务名跨设备校验不可用，请自行确认该名称在全平台唯一。', 'Could not load saved values. You can still type new ones, but the cross-device name check is unavailable — confirm the name is unique across the platform.')}</p>}
         {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
       </form></Modal>}
       {saved && <p role="status" className="text-xs text-text-muted">{tr('已保存，配置通常在 60 秒内生效。', 'Saved. Settings normally apply within 60 seconds.')}</p>}
