@@ -98,6 +98,7 @@ import {
 import { getManagerVersion } from "@/api/version";
 import { usePermissions } from "@/store/me";
 import { notifyDevicesChanged } from "@/lib/events";
+import { isDeviceOnline } from "@/lib/deviceStatus";
 import { useI18n } from "@/i18n/locale";
 
 // Sidebar headers that map to ?roles= filters. Empty string = "全部"; the
@@ -201,6 +202,20 @@ export default function EdgesPage() {
     () => new URLSearchParams(location.search).get("q")?.trim() ?? "",
     [location.search],
   );
+  // ?online=1|0 —— 在线/离线子集过滤（大屏"在线设备""离线设备"两格下钻带过来）。
+  // 后端 /devices 只支持 roles，故在内存里按 Device.online 过滤（全量仅几十台）。
+  const onlineFilter = useMemo<"" | "online" | "offline">(() => {
+    const v = new URLSearchParams(location.search).get("online");
+    if (v === "1") return "online";
+    if (v === "0") return "offline";
+    return "";
+  }, [location.search]);
+  const clearOnlineFilter = useCallback(() => {
+    const params = new URLSearchParams(location.search);
+    params.delete("online");
+    const qs = params.toString();
+    navigate(`/devices${qs ? `?${qs}` : ""}`, { replace: true });
+  }, [location.search, navigate]);
   const setQuery = useCallback(
     (next: string) => {
       const params = new URLSearchParams(location.search);
@@ -215,7 +230,10 @@ export default function EdgesPage() {
   const headerTitle = (() => {
     if (discoveryView) return tr("网络发现", "Network discovery");
     const pair = ROLE_FILTER_TITLES[rolesFilter];
-    return pair ? tr(pair[0], pair[1]) : tr("设备", "Devices");
+    const base = pair ? tr(pair[0], pair[1]) : tr("设备", "Devices");
+    if (onlineFilter === "online") return tr("在线设备", "Online devices");
+    if (onlineFilter === "offline") return tr("离线设备", "Offline devices");
+    return base;
   })();
 
   const [devices, setDevices] = useState<DeviceRow[]>([]);
@@ -499,9 +517,13 @@ export default function EdgesPage() {
   // type into the search box: display name, hostname, and the IP shown in the
   // table (which differs between host and SNMP-managed devices).
   const filteredDevices = useMemo(() => {
+    let list = devices;
+    // 与大屏同一口径（网络设备看可达状态，其余看 agent 心跳）
+    if (onlineFilter === "online") list = list.filter((d) => isDeviceOnline(d));
+    else if (onlineFilter === "offline") list = list.filter((d) => !isDeviceOnline(d));
     const needle = query.trim().toLowerCase();
-    if (!needle) return devices;
-    return devices.filter((d) => {
+    if (!needle) return list;
+    return list.filter((d) => {
       const detail = networkDetails[d.id];
       const haystack = [
         d.name,
@@ -512,7 +534,7 @@ export default function EdgesPage() {
       ];
       return haystack.some((v) => (v ?? "").toLowerCase().includes(needle));
     });
-  }, [devices, networkDetails, query]);
+  }, [devices, networkDetails, query, onlineFilter]);
 
   const selectableDevices = useMemo(
     () =>
@@ -684,7 +706,22 @@ export default function EdgesPage() {
                 ? tr(`${pendingCandidateCount} 个候选等待 SNMP 校验`, `${pendingCandidateCount} candidates awaiting SNMP verification`)
                 : query
                   ? tr(`匹配 ${filteredDevices.length} / ${devices.length} 台设备`, `${filteredDevices.length} of ${devices.length} device(s) matched`)
-                  : tr(`${devices.length} 台设备 · 每 10 秒自动刷新`, `${devices.length} device(s) · auto-refresh every 10s`)}
+                  : onlineFilter
+                    ? (
+                      <span className="inline-flex items-center gap-2">
+                        {onlineFilter === "online"
+                          ? tr(`${filteredDevices.length} 台在线 · 共 ${devices.length} 台设备`, `${filteredDevices.length} online of ${devices.length} device(s)`)
+                          : tr(`${filteredDevices.length} 台离线 · 共 ${devices.length} 台设备`, `${filteredDevices.length} offline of ${devices.length} device(s)`)}
+                        <button
+                          type="button"
+                          onClick={clearOnlineFilter}
+                          className="text-indigo-600 hover:underline dark:text-indigo-400"
+                        >
+                          {tr("查看全部", "View all")}
+                        </button>
+                      </span>
+                    )
+                    : tr(`${devices.length} 台设备 · 每 10 秒自动刷新`, `${devices.length} device(s) · auto-refresh every 10s`)}
           actions={!discoveryView && rolesFilter === "network" ? (isAdmin && <Button variant="primary" size="sm" onClick={() => setSnmpCreateOpen(true)}><Plus size={14} />{tr("添加 SNMP 设备", "Add SNMP device")}</Button>) : !discoveryView && (
           <div className="flex items-center gap-2">
             <Hint content={tr(

@@ -782,6 +782,36 @@ describe("EdgesPage", () => {
     expect(screen.getByText("scanner-host")).toBeInTheDocument();
   });
 
+  it("在线/离线筛选：?online=0 只显示离线设备，并给出查看全部入口", async () => {
+    server.use(
+      http.get("/api/v1/devices", () =>
+        HttpResponse.json({
+          items: [
+            { id: 3, name: "online-host", hostname: "online-host", ip_address: "10.0.0.3", roles: [], online: true },
+            { id: 21, name: "offline-host", hostname: "offline-host", ip_address: "10.0.0.21", roles: [], online: false },
+          ],
+          total: 2,
+        }),
+      ),
+      http.get("/api/v1/edges", () => HttpResponse.json({ items: [], total: 0 })),
+      http.get("/api/v1/k8s/edge-attachments", () => HttpResponse.json({ items: [], total: 0 })),
+      http.get("/api/v1/topology/nodes", () => HttpResponse.json({ items: [], total: 0 })),
+      http.get("/api/v1/topology/relations", () => HttpResponse.json({ items: [], total: 0 })),
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/devices?online=0"]}>
+        <EdgesPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findAllByText("offline-host");
+    // 在线设备被过滤掉，标题切到「离线设备」，副标题给出查看全部入口
+    expect(screen.queryAllByText("online-host")).toHaveLength(0);
+    expect(screen.getByText("离线设备")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看全部" })).toBeInTheDocument();
+  });
+
   it("网络发现页只统计等待校验的候选并隐藏主机操作", async () => {
     server.use(
       http.get("/api/v1/network-discovery/candidates", () =>

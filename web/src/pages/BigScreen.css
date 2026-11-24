@@ -179,27 +179,44 @@
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   border: 1px solid rgba(109, 87, 217, 0.14); background: linear-gradient(180deg, #fff, #f7f7fd);
   overflow: hidden; font: inherit; color: inherit; padding: 0; cursor: pointer;
+  container-type: size; /* 让数字/标签字号随格子高度自适应，避免小屏裁切、大屏偏小 */
   transition: transform 0.18s, box-shadow 0.18s, border-color 0.18s, background 0.18s;
 }
 .bs-res-cell:hover { transform: translateY(-3px); border-color: rgba(109, 87, 217, 0.6); background: #fff; box-shadow: 0 6px 16px rgba(109, 87, 217, 0.18); }
-.bs-res-num { font-size: 39px; font-weight: 700; line-height: 1.05; font-variant-numeric: tabular-nums; transition: transform 0.18s; }
-.bs-res-cell:hover .bs-res-num { transform: scale(1.14); }
-.bs-res-label { font-size: 13px; color: rgb(71 85 105); margin-top: 3px; white-space: nowrap; }
-
-.bs-donut-wrap { display: flex; align-items: center; height: 100%; gap: 8px; }
-.bs-donut-chart { position: relative; flex: 1 1 50%; min-width: 0; height: 100%; display: flex; align-items: center; justify-content: center; }
-.bs-donut-box { position: relative; width: min(72%, 200px); aspect-ratio: 1; }
-.bs-donut-ring { width: 100%; height: 100%; border-radius: 50%; position: relative; }
-.bs-donut-ring::after {
-  content: ""; position: absolute; inset: 23%; border-radius: 50%;
-  background: radial-gradient(circle, #fff 60%, #f6f4ff);
-  box-shadow: inset 0 0 12px rgba(109, 87, 217, 0.1);
+/* 数字占格子高度约 44%，18~40px 之间按容器缩放；min-width:2ch 让 1 位数与 2 位数占同样视觉宽度，避免"6/1 显小" */
+.bs-res-num {
+  font-size: clamp(18px, 44cqh, 40px); font-weight: 700; line-height: 1;
+  min-width: 2ch; text-align: center;
+  font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1;
+  transition: transform 0.18s;
 }
-.bs-donut-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 2; pointer-events: none; }
-.bs-donut-center b { font-size: 34px; font-weight: 700; color: #111827; font-variant-numeric: tabular-nums; }
+.bs-res-cell:hover .bs-res-num { transform: scale(1.06); }
+.bs-res-label { font-size: clamp(10px, 17cqh, 13px); color: rgb(71 85 105); margin-top: clamp(2px, 4cqh, 6px); white-space: nowrap; }
+
+.bs-donut-wrap { display: flex; align-items: center; height: 100%; gap: 8px; min-height: 0; }
+.bs-donut-chart {
+  position: relative; flex: 1 1 50%; min-width: 0; min-height: 0; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  container-type: size; /* lets the centre number scale with the chart box */
+}
+/* SVG ring: viewBox + preserveAspectRatio make it scale to the smaller side,
+   so it can never overflow the panel regardless of panel height. */
+.bs-donut-svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.bs-donut-seg { transition: stroke-width 0.18s ease, opacity 0.18s ease; transform-box: fill-box; transform-origin: center; }
+.bs-donut-center {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 2;
+  pointer-events: none; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  line-height: 1; text-align: center;
+}
+.bs-donut-center b {
+  font-size: 30px;
+  font-size: clamp(16px, 26cqmin, 34px);
+  font-weight: 700; color: #111827; font-variant-numeric: tabular-nums; transition: color 0.18s;
+}
+.bs-donut-center small { margin-top: 3px; font-size: 11px; font-weight: 600; color: rgb(100 116 139); white-space: nowrap; }
 .bs-legend { flex: 1 1 48%; display: flex; flex-direction: column; justify-content: center; gap: 8px; min-width: 0; }
-.bs-legend-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: rgb(71 85 105); border-radius: 3px; transition: background 0.18s, padding-left 0.18s; }
-.bs-legend-row:hover { background: rgba(109, 87, 217, 0.08); padding-left: 6px; }
+.bs-legend-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: rgb(71 85 105); border-radius: 3px; transition: background 0.18s, padding-left 0.18s, color 0.18s; cursor: default; }
+.bs-legend-row:hover, .bs-legend-row.is-active { background: rgba(109, 87, 217, 0.1); padding-left: 6px; color: rgb(30 41 59); }
 .bs-legend-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
 .bs-legend-num { margin-left: auto; color: rgb(17 24 39); font-variant-numeric: tabular-nums; font-weight: 600; }
 
@@ -395,8 +412,8 @@
   .bs-main { grid-template-rows: none; grid-auto-rows: 200px; gap: 8px; padding: 4px 12px 12px; }
   .bs-value-strip { grid-column: span 12; grid-auto-rows: 70px; }
   .bs-panel-head { height: 28px; font-size: 12px; }
-  .bs-panel-extra, .bs-res-label, .bs-legend-row, .bs-alert-row, .bs-risk-ip, .bs-risk-val, .bs-risk-peak { font-size: 10px; }
-  .bs-res-num { font-size: 19px; }
+  .bs-panel-extra, .bs-legend-row, .bs-alert-row, .bs-risk-ip, .bs-risk-val, .bs-risk-peak { font-size: 10px; }
+  /* 数字与标签的字号已由 .bs-res-cell 容器查询自适应，这里不再写死，否则小屏会被裁切 */
   .bs-value-num { font-size: 21px; }
   .bs-alert-target, .bs-alert-time, .bs-alert-sev { font-size: 9px; }
   .bs-panel { grid-column: span 6; }

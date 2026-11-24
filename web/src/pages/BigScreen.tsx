@@ -8,6 +8,7 @@ import { listIncidents, listRules, localizedRuleName, type Incident } from '@/ap
 import { getReport, listReports, type Advice } from '@/api/reports';
 import { usePoll } from '@/lib/usePoll';
 import { relativeTime } from '@/lib/format';
+import { isDeviceOnline } from '@/lib/deviceStatus';
 import './BigScreen.css';
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -108,11 +109,9 @@ export function buildDeviceRows(devices: Device[], cpu: Metrics, mem: Metrics, d
 }
 
 export function onlineCount(devices: Device[]): number {
-  return devices.filter((d) =>
-    d.os?.toLowerCase() === 'network'
-      ? ['reachable', 'online', 'up'].includes((d.reachability_status ?? '').toLowerCase())
-      : d.online === true,
-  ).length;
+  // 口径统一在 lib/deviceStatus（网络设备看 reachability，其余看 online），
+  // 设备列表的 ?online= 过滤复用同一函数。
+  return devices.filter(isDeviceOnline).length;
 }
 
 /** 顶部 5 组监测资源：设备 / 在线 / 告警 / 离线 / 规则，分类着色。 */
@@ -386,9 +385,9 @@ export default function BigScreenPage() {
     const closedToday = trend7[trend7.length - 1]?.closed ?? 0;
     return [
       { icon: '巡', color: '#0e7490', num: String(s.reportsTotal), act: '份巡检报告', lab: `${reportTime} 自动生成 · 无需人工值守`, to: '/reports' },
-      { icon: '闭', color: C.purple, num: `${rate}%`, act: '告警闭环率', lab: `今日闭环 ${closedToday} 条 · ${s.resolvedTotal}/${s.incidentTotal} 累计处置`, to: '/alerts/incidents' },
+      { icon: '闭', color: C.purple, num: `${rate}%`, act: '告警闭环率', lab: `今日闭环 ${closedToday} 条 · ${s.resolvedTotal}/${s.incidentTotal} 累计处置`, to: '/alerts?status=resolved' },
       { icon: '守', color: C.green, num: `${s.devices.length ? Math.round((online / s.devices.length) * 100) : 0}%`, act: '设备在线率', lab: `${s.devices.length} 台全时纳管 · 异常即时发现`, to: '/devices' },
-      { icon: '警', color: C.amber, num: String(s.incidentTotal), act: '次风险预警', lab: '提前发现隐患 · 防患于未然', to: '/alerts/incidents' },
+      { icon: '警', color: C.amber, num: String(s.incidentTotal), act: '次风险预警', lab: '提前发现隐患 · 防患于未然', to: '/alerts' },
       { icon: '稳', color: C.blue, num: String(stableDays), act: '天稳定运行', lab: '平台持续在线 · 业务无中断', to: '/dashboard' },
     ];
   }, [snapshot, groups, trend7]);
@@ -468,8 +467,8 @@ export default function BigScreenPage() {
           <Panel title="基础资源展示" extra={`共 ${snapshot.devices.length} 台设备`} className="col-span-4 bs-panel-res">
             <div className="bs-res-grid">
               {[
-                { label: '在线设备', value: groups[1]?.value ?? 0, color: C.green, to: '/devices' },
-                { label: '离线设备', value: groups[3]?.value ?? 0, color: C.red, to: '/devices' },
+                { label: '在线设备', value: groups[1]?.value ?? 0, color: C.green, to: '/devices?online=1' },
+                { label: '离线设备', value: groups[3]?.value ?? 0, color: C.red, to: '/devices?online=0' },
                 { label: '服务器', value: countRole(snapshot.devices, 'server'), color: C.cyan, to: '/devices?roles=server' },
                 { label: '存储', value: countRole(snapshot.devices, 'storage'), color: C.purple, to: '/devices?roles=storage' },
                 { label: '数据库', value: countRole(snapshot.devices, 'database'), color: C.amber, to: '/devices?roles=database' },
@@ -507,7 +506,7 @@ export default function BigScreenPage() {
           </div>
 
           {/* 第三行：最新告警 / 资源风险设备 / 主动运维战报 */}
-          <Panel title="最新告警信息" extra={`活跃 ${activeIncidents.length} 条 · 自动滚屏`} className="col-span-3 bs-panel-alert">
+          <Panel title="最新告警信息" extra={`活跃 ${activeIncidents.length} 条`} className="col-span-3 bs-panel-alert">
             <div className="bs-alert-wrap">
               <div className="bs-alert-track">
                 {[0, 1].map((copy) => (
@@ -561,7 +560,7 @@ export default function BigScreenPage() {
             </div>
           </Panel>
 
-          <Panel title="主动运维战报" extra="发现 → 处置 → 价值 · 自动滚屏" className="col-span-4 bs-panel-event">
+          <Panel title="主动运维战报" extra="发现 → 处置 → 价值" className="col-span-4 bs-panel-event">
             <div className="bs-event-wrap">
               <div className="bs-event-track">
                 {[0, 1].map((copy) => (
@@ -626,19 +625,84 @@ function Donut({ data, centerValue }: {
   data: Array<{ name: string; value: number; color: string }>; centerValue: string;
 }) {
   const sum = data.reduce((n, d) => n + d.value, 0);
+  // SVG ring geometry. The old implementation was a CSS conic-gradient whose
+  // size was width-driven (aspect-ratio:1 with no height cap), so it overflowed
+  // short panels and its 23% inset made the band ~46% of the radius (too fat).
+  // An SVG with viewBox + preserveAspectRatio scales to whichever side is
+  // smaller, so it can never spill out of the panel, and each slice is its own
+  // <circle> that can be hovered independently.
+  const R = 40;          // ring radius (viewBox units, centre 50,50)
+  const SW = 8;          // resting band width — slimmer for a more refined look
+  const SW_HOT = 11;     // hover band width
+  const CIRC = 2 * Math.PI * R;
+  const [hover, setHover] = useState<number | null>(null);
+  let acc = 0;
+  const segs = data.map((d) => {
+    const frac = sum > 0 ? d.value / sum : 0;
+    const len = frac * CIRC;
+    const seg = { ...d, frac, len, offset: acc };
+    acc += len;
+    return seg;
+  });
+  const hot = hover === null ? null : segs[hover];
+
   return (
     <div className="bs-donut-wrap">
       <div className="bs-donut-chart">
         {sum === 0 ? <div className="bs-list-empty">暂无数据</div> : (
-          <div className="bs-donut-box">
-            <div className="bs-donut-ring" style={{ background: donutGradient(data) }} />
-            <div className="bs-donut-center"><b>{centerValue}</b></div>
-          </div>
+          <>
+            <svg
+              className="bs-donut-svg"
+              viewBox="0 0 100 100"
+              preserveAspectRatio="xMidYMid meet"
+              role="img"
+              aria-label="环形占比图"
+            >
+              <circle cx="50" cy="50" r={R} fill="none" stroke="#eef1f6" strokeWidth={SW} />
+              <g transform="rotate(-90 50 50)">
+                {segs.map((s, i) => (
+                  <circle
+                    key={s.name}
+                    cx="50"
+                    cy="50"
+                    r={R}
+                    fill="none"
+                    stroke={s.color}
+                    strokeWidth={hover === i ? SW_HOT : SW}
+                    strokeDasharray={`${s.len} ${CIRC}`}
+                    strokeDashoffset={-s.offset}
+                    className="bs-donut-seg"
+                    style={{
+                      opacity: hover === null || hover === i ? 1 : 0.32,
+                      cursor: 'pointer',
+                    }}
+                    onMouseEnter={() => setHover(i)}
+                    onMouseLeave={() => setHover(null)}
+                  />
+                ))}
+              </g>
+            </svg>
+            <div className="bs-donut-center">
+              {hot ? (
+                <>
+                  <b style={{ color: hot.color }}>{hot.value}</b>
+                  <small>{hot.name}</small>
+                </>
+              ) : (
+                <b>{centerValue}</b>
+              )}
+            </div>
+          </>
         )}
       </div>
       <div className="bs-legend">
-        {data.map((d) => (
-          <div className="bs-legend-row" key={d.name}>
+        {data.map((d, i) => (
+          <div
+            className={`bs-legend-row${hover === i ? ' is-active' : ''}`}
+            key={d.name}
+            onMouseEnter={() => setHover(i)}
+            onMouseLeave={() => setHover(null)}
+          >
             <span className="bs-legend-dot" style={{ background: d.color, color: d.color }} />
             <span>{d.name}</span>
             <span className="bs-legend-num">{d.value}{sum > 0 ? ` · ${Math.round((d.value / sum) * 100)}%` : ''}</span>

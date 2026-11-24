@@ -2,7 +2,7 @@ import { useAssistantPage } from '@/lib/assistantPage';
 import { Button, Label, Textarea, PageHeader, EmptyStateCard } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, ListTodo, RefreshCw, Siren, X } from 'lucide-react';
 import { Modal } from '@/components/Modal';
 import { cn } from '@/lib/cn';
@@ -46,13 +46,21 @@ const PAGE_SIZE = 50;
 export default function AlertsPage() {
   const { tr } = useI18n();
   const { canMutate } = usePermissions();
+  const [searchParams] = useSearchParams();
+  // 支持从大屏/其它页面带筛选条件直达，例如 /alerts?status=resolved
   const [items, setItems] = useState<Incident[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string>('open');
-  const [severityFilter, setSeverityFilter] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<string>(() => {
+    const s = searchParams.get('status');
+    return s && STATUS_FILTERS.some((f) => f.key === s) ? s : 'open';
+  });
+  const [severityFilter, setSeverityFilter] = useState<string>(() => {
+    const s = searchParams.get('severity');
+    return s && SEVERITY_FILTERS.some((f) => f.key === s) ? s : '';
+  });
   const [page, setPage] = useState(0);
   const [resolving, setResolving] = useState<{ incident: Incident } | null>(null);
   const [ackBusyId, setAckBusyId] = useState<number | null>(null);
