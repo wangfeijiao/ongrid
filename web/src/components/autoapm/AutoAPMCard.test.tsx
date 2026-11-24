@@ -132,3 +132,61 @@ it('uses the device default even when a retired collector default remains saved'
   await user.click(field);
   expect(await screen.findByRole('option', { name: 'device-only-env' })).toBeInTheDocument();
 });
+
+it('warns before a discovered process name already used by another device merges two services', async () => {
+  const user = userEvent.setup(); const save = vi.fn().mockResolvedValue(undefined);
+  // 3 saved host configs already use "orders"; this host has none of them.
+  vi.mocked(getAutoAPMOptions).mockResolvedValue({ environments: [], namespaces: [], service_names: { orders: 3 } });
+  const health = { state: 'running', reported_at: new Date().toISOString(), candidates: [{ executable: '/opt/orders', port: 8080, pid: 12 }] };
+  vi.mocked(listEdgePlugins).mockResolvedValue({ items: [{ plugin_name: 'autoapm', enabled: true, health }] });
+  render(<AutoAPMCard edgeId={1} deviceName="Host" online row={{ plugin_name: 'autoapm', enabled: true, health }} onSave={save} />);
+  await user.click(screen.getByRole('button', { name: 'Add capture target' }));
+  await act(async () => { await user.click(within(await screen.findByRole('radiogroup', { name: 'Discovered processes' })).getByText('orders')); });
+  // The conflict is visible while choosing the process, not only after saving.
+  expect(screen.getByText('Name used on 3 other device(s)')).toBeInTheDocument();
+  expect(screen.getByText(/already used by 3 other device/)).toBeInTheDocument();
+  // A name that only this host uses carries no warning.
+  await user.clear(screen.getByLabelText('Service name'));
+  await user.type(screen.getByLabelText('Service name'), 'order-api');
+  expect(screen.queryByText(/already used by 3 other device/)).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Save target' }));
+  // A shared name may legitimately be a replica, so it must stay savable.
+  expect(save).toHaveBeenCalledWith({ enabled: true, spec: { sample_ratio: 1, tls_insecure_skip_verify: true, targets: [{ executable: '/opt/orders', port: 8080, service_name: 'order-api' }] } });
+});
+
+it('does not flag a name reused on the same device as a cross-device conflict', async () => {
+  const user = userEvent.setup();
+  // The host itself contributes one use of "orders"; only the other host is a real conflict.
+  vi.mocked(getAutoAPMOptions).mockResolvedValue({ environments: [], namespaces: [], service_names: { orders: 2 } });
+  render(<AutoAPMCard edgeId={1} deviceName="Host" online={false} row={{ plugin_name: 'autoapm', enabled: true, spec: { targets: [target] } }} onSave={vi.fn()} />);
+  await user.click(screen.getByRole('button', { name: 'Edit orders' }));
+  expect(screen.getByText(/already used by 1 other device/)).toBeInTheDocument();
+});
+
+it('scopes a colliding default name to this host instead of merging two applications', async () => {
+  const user = userEvent.setup(); const save = vi.fn().mockResolvedValue(undefined);
+  vi.mocked(getAutoAPMOptions).mockResolvedValue({ environments: [], namespaces: [], service_names: { orders: 3 } });
+  const health = { state: 'running', reported_at: new Date().toISOString(), candidates: [{ executable: '/opt/orders', port: 8080, pid: 12 }] };
+  vi.mocked(listEdgePlugins).mockResolvedValue({ items: [{ plugin_name: 'autoapm', enabled: true, health }] });
+  render(<AutoAPMCard edgeId={7} deviceId={7} deviceIp="10.7.30.13" deviceName="host-a" online row={{ plugin_name: 'autoapm', enabled: true, health }} onSave={save} />);
+  await user.click(screen.getByRole('button', { name: 'Add capture target' }));
+  await act(async () => { await user.click(within(await screen.findByRole('radiogroup', { name: 'Discovered processes' })).getByText('orders')); });
+  // Selecting the process applies the host scope by itself: the operator is not
+  // expected to read the warning and retype the name before saving.
+  expect(screen.getByLabelText('Service name')).toHaveValue('orders@10.7.30.13');
+  expect(screen.getByText(/carries this host tag/)).toBeInTheDocument();
+  expect(screen.queryByText(/already used by 3 other device/)).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Save target' }));
+  expect(save.mock.calls[0][0].spec.targets).toEqual([{ executable: '/opt/orders', port: 8080, service_name: 'orders@10.7.30.13' }]);
+});
+
+it('falls back to the device ID for the host scope when no IP is known', async () => {
+  const user = userEvent.setup();
+  vi.mocked(getAutoAPMOptions).mockResolvedValue({ environments: [], namespaces: [], service_names: { orders: 1 } });
+  const health = { state: 'running', reported_at: new Date().toISOString(), candidates: [{ executable: '/opt/orders', port: 8080, pid: 12 }] };
+  vi.mocked(listEdgePlugins).mockResolvedValue({ items: [{ plugin_name: 'autoapm', enabled: true, health }] });
+  render(<AutoAPMCard edgeId={9} deviceId={9} deviceName="host-b" online row={{ plugin_name: 'autoapm', enabled: true, health }} onSave={vi.fn()} />);
+  await user.click(screen.getByRole('button', { name: 'Add capture target' }));
+  await act(async () => { await user.click(within(await screen.findByRole('radiogroup', { name: 'Discovered processes' })).getByText('orders')); });
+  expect(screen.getByLabelText('Service name')).toHaveValue('orders@dev9');
+});

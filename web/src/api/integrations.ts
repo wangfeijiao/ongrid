@@ -67,7 +67,14 @@ export type PluginRow = {
   defaults?: { environment: string; cluster_name: string };
 };
 
-export type AutoAPMOptions = { environments: string[]; namespaces: string[] };
+export type AutoAPMOptions = {
+  environments: string[];
+  namespaces: string[];
+  // Service name -> number of saved host configs already using it. Two hosts
+  // with the same name collapse into one APM service, so the editor warns when
+  // a generic name such as "java-8080" would be reused by another application.
+  service_names?: Record<string, number>;
+};
 export function getAutoAPMOptions() {
   return request<AutoAPMOptions>('GET', '/integrations/autoapm-options');
 }
