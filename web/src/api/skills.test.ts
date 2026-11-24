@@ -6,7 +6,9 @@ import { server } from '@/test/msw-server';
 import { executeSkill } from './skills';
 
 describe('executeSkill', () => {
-  it('sends the selected Edge id for host-scoped skills', async () => {
+  // host 作用域技能按设备寻址（device_id），由服务端反查该设备当前接入的
+  // edge——edge 会随重装/切换而变，前端不该持有 edge id。
+  it('sends the selected device id for host-scoped skills', async () => {
     let requestBody: unknown;
     server.use(
       http.post('/api/v1/skills/host_probe_tcp/execute', async ({ request }) => {
@@ -18,12 +20,12 @@ describe('executeSkill', () => {
     await executeSkill('host_probe_tcp', 52, { target: '127.0.0.1:22' });
 
     expect(requestBody).toEqual({
-      edge_id: 52,
+      device_id: 52,
       params: { target: '127.0.0.1:22' },
     });
   });
 
-  it('omits the Edge id for manager-scoped skills', async () => {
+  it('omits the device id for manager-scoped skills', async () => {
     let requestBody: unknown;
     server.use(
       http.post('/api/v1/skills/query_devices/execute', async ({ request }) => {
