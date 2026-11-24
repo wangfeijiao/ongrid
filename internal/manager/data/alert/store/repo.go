@@ -37,6 +37,9 @@ func (r *Repo) ListIncidents(ctx context.Context, f biz.IncidentFilter) ([]*mode
 	if f.DeviceID != nil {
 		tx = tx.Where("device_id = ?", *f.DeviceID)
 	}
+	if f.ActiveOnly {
+		tx = tx.Where("status <> ?", model.IncidentStatusResolved)
+	}
 	if f.Limit > 0 {
 		tx = tx.Limit(f.Limit)
 	}
@@ -67,6 +70,9 @@ func (r *Repo) CountIncidents(ctx context.Context, f biz.IncidentFilter) (int64,
 	}
 	if f.DeviceID != nil {
 		tx = tx.Where("device_id = ?", *f.DeviceID)
+	}
+	if f.ActiveOnly {
+		tx = tx.Where("status <> ?", model.IncidentStatusResolved)
 	}
 	var n int64
 	if err := tx.Count(&n).Error; err != nil {
