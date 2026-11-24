@@ -64,6 +64,11 @@ func TestRecordFiringRefreshesContentOnRefire(t *testing.T) {
 		if got.Threshold == nil || *got.Threshold != 300 {
 			t.Fatalf("threshold = %v, want 300", got.Threshold)
 		}
+		// A continuous firing (open -> open bump) must keep the original
+		// first_fired_at: it is still the same fault episode.
+		if !got.FirstFiredAt.Equal(now) {
+			t.Fatalf("first_fired_at = %v, want kept at first firing %v on bump", got.FirstFiredAt, now)
+		}
 	})
 
 	t.Run("resolved_reopen_refreshes_content", func(t *testing.T) {
@@ -114,6 +119,14 @@ func TestRecordFiringRefreshesContentOnRefire(t *testing.T) {
 		}
 		if got.Threshold == nil || *got.Threshold != 300 {
 			t.Fatalf("threshold = %v, want 300", got.Threshold)
+		}
+		// A reopen starts a new fault episode: first_fired_at and event_count
+		// must reset to this firing, not stay frozen at the original creation.
+		if !got.FirstFiredAt.Equal(now.Add(time.Minute)) {
+			t.Fatalf("first_fired_at = %v, want reset to reopen firing %v", got.FirstFiredAt, now.Add(time.Minute))
+		}
+		if got.EventCount != 1 {
+			t.Fatalf("event_count = %d, want reset to 1 on reopen", got.EventCount)
 		}
 	})
 }
