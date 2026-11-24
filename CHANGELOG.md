@@ -9,6 +9,17 @@
 - 统一 Host 持久身份与当前 Edge 安装关联；重装保留设备及可观测历史，旧安装不能抢占当前绑定。
 - 主机工具统一为 `get_host_summary`、`rank_hosts`、`find_outlier_hosts`，区分 Agent runtime 与 Edge 二进制版本。
 - metrics 插件按采集目标分别跟踪 scrape/push 错误，恢复后清除对应 `last_error`。
+- 告警抑制规则改按 `(rule, device_id)` 匹配并新增 `ActiveOnly`：设备离线不再连带 CPU / 内存 / 磁盘告警刷屏，写入故障时抑制 `scrape_down`。原先两条内置规则按固定 dedupe 键探测，键形态改成 `pipeline:<rule>:<labelSetKey>` 后再没匹配上，等同死代码。
+- 告警 reopen 视为新一次故障周期，重置 `first_fired_at` 与 `event_count`；设备间歇离线不再显示成「挂了一个月」。
+- 前端技能执行改按 `device_id` 寻址（由服务端反查该设备当前接入的 edge），修正过期断言。
+
+### 新增
+
+- APM 建采集目标时，服务名已被其它设备占用则自动追加 `@<设备IP>`，避免多机同名被聚合成一个服务；不冲突时维持原名。
+- 大屏指标格支持下钻到对应列表（在线/离线设备、告警闭环率、风险预警）；「是否在线」判定统一到 `lib/deviceStatus`；环形图改为 SVG，矮面板不再溢出。
+
+> 详见 [docs/ops/alert-apm-fixes-20261124.md](docs/ops/alert-apm-fixes-20261124.md)。
+> **这批改动在 v0.22.0-opt6/opt7 上并未生效**（发版换成官方 v0.22.0 基线），发版前请先读该文档第七节。
 
 ## v0.9.0 (2026-06-27)
 
