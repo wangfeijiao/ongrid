@@ -14,6 +14,7 @@ const EdgesPage = lazy(() => import('@/pages/Edges'));
 const EdgeDetailPage = lazy(() => import('@/pages/EdgeDetail'));
 const DeviceShellPage = lazy(() => import('@/pages/DeviceShell'));
 const DashboardPage = lazy(() => import('@/pages/Dashboard'));
+const BigScreenPage = lazy(() => import('@/pages/BigScreen'));
 const MonitorPage = lazy(() => import('@/pages/Monitor'));
 const LogsPage = lazy(() => import('@/pages/Logs'));
 const ApmCapturePage = lazy(() => import('@/pages/ApmCapture'));
@@ -116,6 +117,7 @@ export default function App() {
           <Route path="/chat/:sessionId" element={<ChatThreadPage />} />
         </Route>
         <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/bigscreen" element={<BigScreenPage />} />
         {/* /edges is the legacy route, kept as an alias to /devices for
             backward-compatible bookmarks; the canonical name post-split
             is /devices. */}

@@ -41,6 +41,7 @@ type Service struct {
 	repos    BindingRepositories
 
 	receivers ReceiverResolver
+	hosts     HostResolver
 	log       *slog.Logger
 
 	errorSnapshots errorSnapshots
@@ -64,6 +65,9 @@ func (s *Service) List(ctx context.Context, q Query, operations bool) (*ListResu
 		if err != nil {
 			return nil, err
 		}
+	}
+	if !operations {
+		s.attachHosts(ctx, q, rows)
 	}
 	envs, namespaces := map[string]bool{}, map[string]bool{}
 	filtered := make([]Summary, 0, len(rows))

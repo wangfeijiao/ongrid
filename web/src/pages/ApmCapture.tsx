@@ -57,7 +57,7 @@ export default function ApmCapturePage() {
       {!valid ? <EmptyState title={tr('无效的采集配置地址', 'Invalid capture configuration URL')} />
         : error ? <div role="alert"><EmptyState title={tr('配置加载失败', 'Could not load capture configuration')} hint={error} action={<Button onClick={() => setRefresh(value => value + 1)}>{tr('重试', 'Retry')}</Button>} /></div>
         : !resource ? <p role="status" className="text-sm text-text-muted">{tr('正在加载配置…', 'Loading configuration…')}</p>
-        : resource.kind === 'devices' ? <AutoAPMCard key={`device-${id}`} deviceId={resource.device.id} edgeId={resource.device.current_edge_id ?? 0} deviceName={name ?? ''} canEdit={isAdmin} online={!!resource.device.online} row={resource.row} onSave={body => setHostPlugin(resource.device.id, 'autoapm', body)} />
+        : resource.kind === 'devices' ? <AutoAPMCard key={`device-${id}`} deviceId={resource.device.id} edgeId={resource.device.current_edge_id ?? 0} deviceName={name ?? ''} deviceIp={resource.device.ip_address} canEdit={isAdmin} online={!!resource.device.online} row={resource.row} onSave={body => setHostPlugin(resource.device.id, 'autoapm', body)} />
         : <KubernetesCapture key={`cluster-${id}`} cluster={resource.cluster} canEdit={isAdmin} />}
     </main>
   </div>;

@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
 import { type MonitorPanel } from '@/api/monitorPanels';
 import { type GrafanaPanel } from '@/api/grafana';
-import { PromQLPanel } from '@/components/PromQLPanel';
+import { PromQLPanel, type DeviceBadgeResolver } from '@/components/PromQLPanel';
 import { injectDeviceIDFilter, referencesDeviceID } from '@/lib/promql';
 import { useI18n } from '@/i18n/locale';
 
@@ -54,6 +54,8 @@ export function UserPanelGrid({
   onEdit,
   onDelete,
   filteredDeviceIDs,
+  resolveDevice,
+  onDeviceClick,
 }: {
   panels: MonitorPanel[];
   range: string;
@@ -67,6 +69,8 @@ export function UserPanelGrid({
   onEdit(panel: MonitorPanel): void;
   onDelete(panel: MonitorPanel): void;
   filteredDeviceIDs: number[] | null;
+  resolveDevice?: DeviceBadgeResolver;
+  onDeviceClick?: (deviceId: number) => void;
 }) {
   const { tr } = useI18n();
   const [narrow, setNarrow] = useState<boolean>(
@@ -106,6 +110,8 @@ export function UserPanelGrid({
               fromMs={fromMs}
               toMs={toMs}
               onOpenInGrafana={onOpenPanel}
+              resolveDevice={resolveDevice}
+              onDeviceClick={onDeviceClick}
             />
             {isFiltered && (
               <Hint content={tr('本面板按角色筛选过设备', 'This panel is filtered by role')}><div

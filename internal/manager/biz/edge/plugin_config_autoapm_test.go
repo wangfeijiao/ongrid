@@ -110,6 +110,46 @@ func TestAutoAPMEnvironmentInheritanceAndSavedOptions(t *testing.T) {
 	}
 }
 
+// multiSpecRepo returns hand-written specs so one test can represent several
+// devices, which the single-row fake cannot.
+type multiSpecRepo struct {
+	PluginConfigRepo
+	specs []string
+}
+
+func (r multiSpecRepo) ListAutoAPMSpecs(context.Context) ([]string, error) { return r.specs, nil }
+
+func TestAutoAPMOptionsCountsServiceNamesPerHost(t *testing.T) {
+	ctx := context.Background()
+	repo := multiSpecRepo{specs: []string{
+		`{"targets":[{"executable":"/usr/bin/java","port":8080,"service_name":"java-8080"},{"executable":"/opt/order","port":9000,"service_name":"order-api"}]}`,
+		`{"targets":[{"executable":"/usr/bin/java","port":8080,"service_name":"java-8080"}]}`,
+		`{"targets":[{"executable":"/usr/bin/java","port":8080,"service_name":"java-8080"},{"executable":"/usr/bin/java","port":8081,"service_name":"java-8080"}]}`,
+		`{"targets":[{"executable":"/opt/blank","port":7000,"service_name":""}]}`,
+		`{"environment":"production","kubernetes":{"rules":[{"namespace":"kube-system"}]}}`,
+	}}
+	uc := NewPluginConfigUC(repo, nil, fakeEndpointResolver{}, nil)
+	options, err := uc.AutoAPMOptions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Three devices use java-8080; the third one has two such targets but is
+	// still a single host, so the count must stay 3 rather than 4.
+	if options.ServiceNames["java-8080"] != 3 {
+		t.Fatalf("java-8080 hosts = %d, want 3", options.ServiceNames["java-8080"])
+	}
+	if options.ServiceNames["order-api"] != 1 {
+		t.Fatalf("order-api hosts = %d, want 1", options.ServiceNames["order-api"])
+	}
+	// Names already reused across hosts are the ones worth warning about.
+	if _, ok := options.ServiceNames[""]; ok {
+		t.Fatal("empty service name must not be counted")
+	}
+	if len(options.ServiceNames) != 2 {
+		t.Fatalf("service names = %+v, want only java-8080 and order-api", options.ServiceNames)
+	}
+}
+
 func TestOldEdgeDiscoveryFiltersSystemdWithoutChangingStoredHeartbeat(t *testing.T) {
 	uc := &Usecase{}
 	items := []PluginHealth{{Name: "autoapm", Candidates: []autoapm.Candidate{{Executable: "/usr/lib/systemd/systemd", PID: 1, Port: 22}, {Executable: "/opt/orders", PID: 10, Port: 8080}}}}

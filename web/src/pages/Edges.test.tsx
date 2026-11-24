@@ -782,6 +782,36 @@ describe("EdgesPage", () => {
     expect(screen.getByText("scanner-host")).toBeInTheDocument();
   });
 
+  it("在线/离线筛选：?online=0 只显示离线设备，并给出查看全部入口", async () => {
+    server.use(
+      http.get("/api/v1/devices", () =>
+        HttpResponse.json({
+          items: [
+            { id: 3, name: "online-host", hostname: "online-host", ip_address: "10.0.0.3", roles: [], online: true },
+            { id: 21, name: "offline-host", hostname: "offline-host", ip_address: "10.0.0.21", roles: [], online: false },
+          ],
+          total: 2,
+        }),
+      ),
+      http.get("/api/v1/edges", () => HttpResponse.json({ items: [], total: 0 })),
+      http.get("/api/v1/k8s/edge-attachments", () => HttpResponse.json({ items: [], total: 0 })),
+      http.get("/api/v1/topology/nodes", () => HttpResponse.json({ items: [], total: 0 })),
+      http.get("/api/v1/topology/relations", () => HttpResponse.json({ items: [], total: 0 })),
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/devices?online=0"]}>
+        <EdgesPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findAllByText("offline-host");
+    // 在线设备被过滤掉，标题切到「离线设备」，副标题给出查看全部入口
+    expect(screen.queryAllByText("online-host")).toHaveLength(0);
+    expect(screen.getByText("离线设备")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看全部" })).toBeInTheDocument();
+  });
+
   it("网络发现页只统计等待校验的候选并隐藏主机操作", async () => {
     server.use(
       http.get("/api/v1/network-discovery/candidates", () =>
@@ -823,6 +853,41 @@ describe("EdgesPage", () => {
     expect(screen.queryByText("WebSSH 会话")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "批量安装设备" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "新建设备" })).not.toBeInTheDocument();
+  });
+
+  it("按名称和 IP 过滤设备列表", async () => {
+    render(
+      <MemoryRouter>
+        <EdgesPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("bare-metal-1");
+    const search = screen.getByRole("textbox", { name: "搜索名称 / IP / 主机名…" });
+
+    // 名称命中：只剩 bare-metal-1
+    await userEvent.type(search, "bare-metal");
+    await waitFor(() =>
+      expect(screen.queryByText("k8s:kind-local:ongrid-k8s-control-plane")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("bare-metal-1")).toBeInTheDocument();
+    expect(screen.getByText("匹配 1 / 2 台设备")).toBeInTheDocument();
+
+    // IP 命中：只剩 control-plane
+    await userEvent.clear(search);
+    await userEvent.type(search, "10.0.0.5");
+    await waitFor(() =>
+      expect(screen.queryByText("bare-metal-1")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("k8s:kind-local:ongrid-k8s-control-plane")).toBeInTheDocument();
+
+    // 无匹配时给出空态，且可一键清除（工具栏与空态各有一个按钮）
+    await userEvent.clear(search);
+    await userEvent.type(search, "10.9.9.9");
+    expect(await screen.findByText('没有匹配「10.9.9.9」的设备')).toBeInTheDocument();
+    await userEvent.click(screen.getAllByRole("button", { name: "清除筛选" })[0]);
+    expect(await screen.findByText("bare-metal-1")).toBeInTheDocument();
+    expect(screen.getByText("2 台设备 · 每 10 秒自动刷新")).toBeInTheDocument();
   });
 });
 

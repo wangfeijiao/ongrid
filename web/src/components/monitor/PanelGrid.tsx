@@ -10,7 +10,7 @@
 // 6-col widths become unreadable below that.
 import { useEffect, useState } from 'react';
 import { type GrafanaPanel } from '@/api/grafana';
-import { PromQLPanel } from '@/components/PromQLPanel';
+import { PromQLPanel, type DeviceBadgeResolver } from '@/components/PromQLPanel';
 
 export function PanelGrid({
   panels,
@@ -22,6 +22,8 @@ export function PanelGrid({
   dashboardUid,
   orgId,
   onOpenPanel,
+  resolveDevice,
+  onDeviceClick,
 }: {
   panels: GrafanaPanel[];
   range: string;
@@ -32,6 +34,8 @@ export function PanelGrid({
   dashboardUid: string;
   orgId: string;
   onOpenPanel: (panelId: number) => void;
+  resolveDevice?: DeviceBadgeResolver;
+  onDeviceClick?: (deviceId: number) => void;
 }) {
   const [narrow, setNarrow] = useState<boolean>(
     typeof window !== 'undefined' ? window.innerWidth < 1200 : false,
@@ -68,6 +72,8 @@ export function PanelGrid({
               fromMs={fromMs}
               toMs={toMs}
               onOpenInGrafana={onOpenPanel}
+              resolveDevice={resolveDevice}
+              onDeviceClick={onDeviceClick}
             />
           </div>
         );

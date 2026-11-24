@@ -9,7 +9,7 @@ import { Select } from '@/components/ui/Select';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePoll } from '@/lib/usePoll';
 import { RefreshCw, Plus } from 'lucide-react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { type GrafanaPanel } from '@/api/grafana';
 import {
   type MonitorPanel,
@@ -27,6 +27,7 @@ import { UserPanelGrid } from '@/components/monitor/UserPanelGrid';
 import { ProcessTopPanel } from '@/components/monitor/ProcessTopPanel';
 import { useObservability } from '@/store/observability';
 import { listEdges, type Edge, type EdgeRole } from '@/api/edges';
+import type { DeviceBadgeResolver } from '@/components/PromQLPanel';
 import { onDevicesChanged } from '@/lib/events';
 import { injectDeviceIDFilter } from '@/lib/promql';
 import { RoleSelect, type RoleFilterValue } from '@/components/ui';
@@ -370,6 +371,52 @@ export default function MonitorPage() {
     return ids;
   }, [edges, roleFilter, deviceFilter]);
 
+  const navigate = useNavigate();
+
+  // Monitor charts carry only a numeric device_id. Build a lookup from the
+  // edges we already fetched so every series label can show which machine
+  // it is (name / business name / IP / role) instead of a bare id, and a
+  // click can drill into that device's detail page.
+  const deviceById = useMemo(() => {
+    const m = new Map<number, Edge>();
+    for (const e of edges) {
+      if (typeof e.device_id === 'number') m.set(e.device_id, e);
+    }
+    return m;
+  }, [edges]);
+
+  const resolveDevice = useCallback<DeviceBadgeResolver>((deviceId) => {
+    const did = Number(deviceId);
+    const e = deviceById.get(did);
+    if (!e) return undefined;
+    const host = e.host_info && typeof e.host_info === 'object' ? e.host_info : {};
+    const hostname = typeof host.hostname === 'string' ? host.hostname : '';
+    const ip =
+      (typeof host.ip === 'string' && host.ip) ||
+      (Array.isArray(host.ips) && typeof host.ips[0] === 'string' ? host.ips[0] : '') ||
+      '';
+    // name is the operator-facing host label (e.g. srv-10-7-30-74 or an IP);
+    // device_name is the business name when one was set.
+    const label = e.name || hostname || `#${did}`;
+    const bits: string[] = [];
+    if (e.device_name && e.device_name !== e.name) bits.push(e.device_name);
+    if (hostname && hostname !== label) bits.push(hostname);
+    if (ip) bits.push(ip);
+    if (Array.isArray(e.roles) && e.roles.length > 0) bits.push(e.roles.join('/'));
+    bits.push(`#${did}`);
+    return { label, detail: bits.join(' · ') };
+  }, [deviceById]);
+
+  const handleDeviceClick = useCallback((deviceId: number) => {
+    // EdgeDetail's canonical /devices/:id route loads by DEVICE id
+    // (getDevice → GET /devices/:id), NOT by edge id. Monitor series carry
+    // device_id (that is exactly the key of deviceById), so navigating with
+    // e.id produced a 404 "not found" — edge id and device id are different
+    // namespaces (e.g. edge 79 ↔ device 2003 on this fleet).
+    if (!deviceById.has(deviceId)) return;
+    navigate(`/devices/${encodeURIComponent(String(deviceId))}`);
+  }, [deviceById, navigate]);
+
   const panels = useMemo<GrafanaPanel[]>(() => {
     const base = buildMonitorPanels();
     if (filteredDeviceIDs === null) return base;
@@ -610,6 +657,8 @@ export default function MonitorPage() {
           toMs={toMs}
           tick={tick}
           onOpenPanel={handleOpenPanel}
+          resolveDevice={resolveDevice}
+          onDeviceClick={handleDeviceClick}
         />
 
         {/* Process top-N — only when a single device is pinned. Cluster
@@ -659,6 +708,8 @@ export default function MonitorPage() {
               onEdit={handleEditPanel}
               onDelete={handleDeletePanel}
               filteredDeviceIDs={filteredDeviceIDs}
+              resolveDevice={resolveDevice}
+              onDeviceClick={handleDeviceClick}
             />
           </section>
         )}

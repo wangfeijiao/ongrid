@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"encoding/json"
+	"sort"
 	"strings"
 	"time"
 
@@ -25,50 +27,171 @@ func NewNetworkDiscoveryRepo(db *gorm.DB) *NetworkDiscoveryRepo {
 var _ biz.NetworkDiscoveryRepo = (*NetworkDiscoveryRepo)(nil)
 var _ biz.NetworkPromotionRepo = (*NetworkDiscoveryRepo)(nil)
 
+// maxObserversPerCandidate caps the evidence array so a single candidate
+// row cannot grow unbounded when many edges observe the same device.
+const maxObserversPerCandidate = 100
+
+// mergeObserverJSON merges an incoming observer-evidence JSON array into the
+// existing one. Evidence is keyed by observer_edge_id so a re-observation from
+// the same edge replaces its prior snapshot instead of appending duplicates.
+// The result is capped at maxObserversPerCandidate, keeping the most recent
+// (by observed_at) entries. Inputs are the raw JSON strings stored under the
+// reserved "_observers" key of source_data_json.
+func mergeObserverJSON(existing, incoming string) string {
+	type evidence = map[string]string
+	byEdge := make(map[string]evidence)
+
+	parse := func(raw string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" || raw == "[]" || raw == "null" {
+			return
+		}
+		var arr []evidence
+		if err := json.Unmarshal([]byte(raw), &arr); err != nil {
+			return
+		}
+		for _, item := range arr {
+			if item == nil {
+				continue
+			}
+			key := item["observer_edge_id"]
+			if key == "" {
+				key = item["observed_at"] + "|" + item["ip_address"]
+			}
+			if key == "" {
+				continue
+			}
+			byEdge[key] = item
+		}
+	}
+	parse(existing)
+	parse(incoming)
+
+	items := make([]evidence, 0, len(byEdge))
+	for _, v := range byEdge {
+		items = append(items, v)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i]["observed_at"] < items[j]["observed_at"]
+	})
+	if len(items) > maxObserversPerCandidate {
+		items = items[len(items)-maxObserversPerCandidate:]
+	}
+	out, err := json.Marshal(items)
+	if err != nil {
+		return incoming
+	}
+	return string(out)
+}
+
 // UpsertCandidates keeps the latest observation while preserving the first
-// seen timestamp. The unique observation key makes retries idempotent.
+// seen timestamp. OPT-010: the observation key is now global per device (MAC),
+// so one row accumulates evidence from every observing edge in the reserved
+// "_observers" array of source_data_json.
 func (r *NetworkDiscoveryRepo) UpsertCandidates(ctx context.Context, candidates []*model.NetworkDiscoveryCandidate) error {
 	if len(candidates) == 0 {
 		return nil
 	}
+
+	// Collapse same-key rows within this batch first (multiple edges reporting
+	// the same MAC in one ingestion cycle). Strongest evidence wins the main
+	// fields; observer arrays are concatenated.
+	type batch struct {
+		primary *model.NetworkDiscoveryCandidate
+		all     []*model.NetworkDiscoveryCandidate
+	}
+	batches := make(map[string]*batch)
+	order := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		b := batches[c.ObservationKey]
+		if b == nil {
+			b = &batch{}
+			batches[c.ObservationKey] = b
+			order = append(order, c.ObservationKey)
+		}
+		b.all = append(b.all, c)
+		if b.primary == nil || c.Confidence > b.primary.Confidence ||
+			(c.Confidence == b.primary.Confidence && c.LastSeenAt.After(b.primary.LastSeenAt)) {
+			b.primary = c
+		}
+	}
+	merged := make([]*model.NetworkDiscoveryCandidate, 0, len(order))
+	for _, key := range order {
+		b := batches[key]
+		if len(b.all) == 1 {
+			merged = append(merged, b.primary)
+			continue
+		}
+		prim := b.primary
+		obs := ""
+		for _, c := range b.all {
+			obs = mergeObserverJSON(obs, extractObservers(c.SourceDataJSON))
+		}
+		prim.SourceDataJSON = setObservers(prim.SourceDataJSON, obs)
+		merged = append(merged, prim)
+	}
+	candidates = merged
+
 	keys := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
 		keys = append(keys, candidate.ObservationKey)
 	}
-	var verifiedRows []*model.NetworkDiscoveryCandidate
+
+	// Load existing rows so we can merge observer evidence instead of blindly
+	// overwriting it on conflict.
+	var existing []*model.NetworkDiscoveryCandidate
 	if err := r.db.WithContext(ctx).
-		Where("observation_key IN ? AND source = ? AND status IN ?", keys, "snmp", []string{
-			biz.NetworkCandidateStatusSNMPVerified,
-			biz.NetworkCandidateStatusPromoted,
-		}).
-		Find(&verifiedRows).Error; err != nil {
+		Where("observation_key IN ?", keys).
+		Find(&existing).Error; err != nil {
 		return err
 	}
-	verifiedByKey := make(map[string]*model.NetworkDiscoveryCandidate, len(verifiedRows))
-	for _, row := range verifiedRows {
-		verifiedByKey[row.ObservationKey] = row
+	existingByKey := make(map[string]*model.NetworkDiscoveryCandidate, len(existing))
+	for _, row := range existing {
+		existingByKey[row.ObservationKey] = row
 	}
+
 	for _, candidate := range candidates {
-		verified := verifiedByKey[candidate.ObservationKey]
-		if verified == nil || candidate.Source == "snmp" {
-			continue
+		old := existingByKey[candidate.ObservationKey]
+		if old != nil {
+			// Merge observer evidence arrays.
+			prevObs := extractObservers(old.SourceDataJSON)
+			incomingObs := extractObservers(candidate.SourceDataJSON)
+			mergedObs := mergeObserverJSON(prevObs, incomingObs)
+			candidate.SourceDataJSON = setObservers(candidate.SourceDataJSON, mergedObs)
+
+			// Preserve the first-seen timestamp (not part of the upsert update set).
+			if candidate.FirstSeenAt.IsZero() || old.FirstSeenAt.Before(candidate.FirstSeenAt) {
+				candidate.FirstSeenAt = old.FirstSeenAt
+			}
+			// Keep terminal status fields untouched; status is updated below.
 		}
-		// Passive LLDP/ARP refreshes keep liveness current but must not erase
-		// the richer identity, interface and link snapshot established by a
-		// successful authenticated SNMP read.
-		candidate.Source = verified.Source
-		if strings.TrimSpace(candidate.IPAddress) == "" {
-			candidate.IPAddress = verified.IPAddress
+
+		// SNMP-verified rows keep their richer identity snapshot against weak
+		// passive refreshes (preserves pre-OPT-010 behaviour).
+		verified := old
+		if verified == nil || !strings.EqualFold(verified.Source, "snmp") ||
+			(verified.Status != biz.NetworkCandidateStatusSNMPVerified && verified.Status != biz.NetworkCandidateStatusPromoted) {
+			verified = nil
 		}
-		candidate.SourceDataJSON = verified.SourceDataJSON
-		candidate.InterfacesJSON = verified.InterfacesJSON
-		if strings.TrimSpace(candidate.LinksJSON) == "" || strings.TrimSpace(candidate.LinksJSON) == "[]" {
-			candidate.LinksJSON = verified.LinksJSON
-		}
-		if candidate.Confidence < verified.Confidence {
-			candidate.Confidence = verified.Confidence
+		if verified != nil && !strings.EqualFold(candidate.Source, "snmp") {
+			candidate.Source = verified.Source
+			if strings.TrimSpace(candidate.IPAddress) == "" {
+				candidate.IPAddress = verified.IPAddress
+			}
+			// Re-apply the verified identity snapshot but keep the merged observers.
+			mergedObs := extractObservers(candidate.SourceDataJSON)
+			candidate.SourceDataJSON = verified.SourceDataJSON
+			candidate.SourceDataJSON = setObservers(candidate.SourceDataJSON, mergedObs)
+			candidate.InterfacesJSON = verified.InterfacesJSON
+			if strings.TrimSpace(candidate.LinksJSON) == "" || strings.TrimSpace(candidate.LinksJSON) == "[]" {
+				candidate.LinksJSON = verified.LinksJSON
+			}
+			if candidate.Confidence < verified.Confidence {
+				candidate.Confidence = verified.Confidence
+			}
 		}
 	}
+
 	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "observation_key"}},
 		DoUpdates: clause.AssignmentColumns([]string{
@@ -80,9 +203,8 @@ func (r *NetworkDiscoveryRepo) UpsertCandidates(ctx context.Context, candidates 
 		return err
 	}
 
-	// Status is a monotonic workflow state, not an observation field. Keep
-	// terminal states intact while allowing a stronger LLDP/SNMP observation
-	// to promote an earlier weak ARP/gateway candidate.
+	// Status is a monotonic workflow state. Merge across all observations of
+	// this key: any identified/verified observation promotes an unknown row.
 	for _, candidate := range candidates {
 		if candidate.Status != biz.NetworkCandidateStatusIdentified {
 			continue
@@ -94,6 +216,35 @@ func (r *NetworkDiscoveryRepo) UpsertCandidates(ctx context.Context, candidates 
 		}
 	}
 	return nil
+}
+
+// extractObservers pulls the reserved "_observers" JSON array from a
+// source_data_json string. Returns "[]" when absent.
+func extractObservers(sourceDataJSON string) string {
+	var data map[string]string
+	if err := json.Unmarshal([]byte(sourceDataJSON), &data); err != nil || data == nil {
+		return "[]"
+	}
+	v := strings.TrimSpace(data["_observers"])
+	if v == "" {
+		return "[]"
+	}
+	return v
+}
+
+// setObservers replaces the reserved "_observers" entry in a source_data_json
+// string with the given JSON array, preserving all other fields.
+func setObservers(sourceDataJSON, observersJSON string) string {
+	var data map[string]string
+	if err := json.Unmarshal([]byte(sourceDataJSON), &data); err != nil || data == nil {
+		data = make(map[string]string)
+	}
+	data["_observers"] = observersJSON
+	out, err := json.Marshal(data)
+	if err != nil {
+		return sourceDataJSON
+	}
+	return string(out)
 }
 
 func (r *NetworkDiscoveryRepo) ListCandidates(ctx context.Context, filter biz.NetworkCandidateFilter) ([]*model.NetworkDiscoveryCandidate, int64, error) {

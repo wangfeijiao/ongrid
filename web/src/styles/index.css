@@ -995,3 +995,11 @@ html.light .og-chip[data-tone="accent"] { color: rgb(67 56 202); }
     padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom);
   }
 }
+
+/* Device monitor hover card: scrollable when a panel has 50+ series.
+   Slim dark scrollbar so it stays legible on the dark tooltip surface. */
+.og-device-tooltip { scrollbar-width: thin; scrollbar-color: #52525b transparent; }
+.og-device-tooltip::-webkit-scrollbar { width: 7px; }
+.og-device-tooltip::-webkit-scrollbar-track { background: transparent; }
+.og-device-tooltip::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
+.og-device-tooltip::-webkit-scrollbar-thumb:hover { background: #52525b; }

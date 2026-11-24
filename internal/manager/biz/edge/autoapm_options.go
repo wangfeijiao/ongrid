@@ -12,6 +12,12 @@ import (
 type AutoAPMOptions struct {
 	Environments []string `json:"environments"`
 	Namespaces   []string `json:"namespaces"`
+	// ServiceNames counts how many saved host configs already use each service
+	// name. A target is scoped to one process on one host, so the same name on
+	// two hosts collapses into one APM service even when the processes differ.
+	// The editor needs this to warn before a name like "java-8080" is reused by
+	// an unrelated application.
+	ServiceNames map[string]int `json:"service_names,omitempty"`
 }
 
 // AutoAPMOptions derives reusable values from persisted settings, including
@@ -29,7 +35,9 @@ func (uc *PluginConfigUC) AutoAPMOptions(ctx context.Context) (*AutoAPMOptions, 
 		specs = append(specs, clusterSpecs...)
 	}
 	environments, namespaces := map[string]bool{}, map[string]bool{}
-	for _, raw := range specs {
+	// Host configs are per device, so one entry per spec means one device.
+	serviceHosts := map[string]map[int]bool{}
+	for index, raw := range specs {
 		var spec autoapm.Spec
 		if err := json.Unmarshal([]byte(raw), &spec); err != nil {
 			return nil, fmt.Errorf("read saved auto APM settings: %w", err)
@@ -42,6 +50,13 @@ func (uc *PluginConfigUC) AutoAPMOptions(ctx context.Context) (*AutoAPMOptions, 
 		for _, target := range spec.Targets {
 			environments[target.Environment] = true
 			namespaces[target.ServiceNamespace] = true
+			if target.ServiceName == "" {
+				continue
+			}
+			if serviceHosts[target.ServiceName] == nil {
+				serviceHosts[target.ServiceName] = map[int]bool{}
+			}
+			serviceHosts[target.ServiceName][index] = true
 		}
 	}
 	values := func(set map[string]bool) []string {
@@ -54,5 +69,9 @@ func (uc *PluginConfigUC) AutoAPMOptions(ctx context.Context) (*AutoAPMOptions, 
 		sort.Strings(out)
 		return out
 	}
-	return &AutoAPMOptions{Environments: values(environments), Namespaces: values(namespaces)}, nil
+	serviceNames := make(map[string]int, len(serviceHosts))
+	for name, hosts := range serviceHosts {
+		serviceNames[name] = len(hosts)
+	}
+	return &AutoAPMOptions{Environments: values(environments), Namespaces: values(namespaces), ServiceNames: serviceNames}, nil
 }

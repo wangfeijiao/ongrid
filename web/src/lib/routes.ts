@@ -38,6 +38,7 @@ const ROUTE_DEFS: RouteDef[] = [
   { path: '/devices?roles=network', zh: '设备 / 网络设备', en: 'Devices / Network', keywords: ['network', 'switch', 'router', 'wangluo'], group: '基础设施' },
 
   { path: '/monitor', zh: '监控', en: 'Monitor', keywords: ['monitor', 'metrics', 'jiankong'], group: '监控告警' },
+  { path: '/bigscreen', zh: '监控大屏', en: 'Big screen', keywords: ['bigscreen', 'screen', 'daping', 'wall', '大屏'], group: '监控告警' },
   { path: '/logs', zh: '日志', en: 'Logs', keywords: ['logs', 'rizhi'], group: '监控告警' },
   { path: '/apm', zh: '服务', en: 'Services', keywords: ['apm', 'services', 'performance', '应用性能'], group: '监控告警' },
   { path: '/traces', zh: '链路', en: 'Traces', keywords: ['traces', 'tracing', 'lianlu'], group: '监控告警' },

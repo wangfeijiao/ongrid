@@ -353,13 +353,14 @@ func (e *PipelineEvaluator) evaluatePromQuery(ctx context.Context, now time.Time
 			dedupeKey := fmt.Sprintf("pipeline:%s:%s", rule.RuleKey, labelSetKey(ent.Metric))
 			fired[dedupeKey] = struct{}{}
 			summary := fmt.Sprintf("%s: %s ⇒ %s (value=%s)", rule.RuleKey, rule.Expr, labelSetKey(ent.Metric), valStr)
-			// Extract device_id from result labels when present — host-scope
-			// rules require it for FiringInput validation, and the new
-			// device-aware queries (`by (device_id)`) carry it as a label
-			// on every series. Best-effort: malformed values fall through
-			// and validateFiring rejects with a clear message.
+			// Host-scope rules always carry a device. Global rules whose
+			// subject IS a single device (device_offline) are included so the
+			// built-in inhibitor can tie derived host alerts to the offline
+			// root cause. monitoring_pipeline rules stay NULL on purpose:
+			// incident ownership there is a red line (see
+			// notification_readable_test.go).
 			var devID *uint64
-			if scope == model.RuleScopeHost {
+			if scope == model.RuleScopeHost || rule.RuleKey == "device_offline" || rule.RuleKey == "edge_offline" {
 				if v, ok := ent.Metric["device_id"]; ok && v != "" {
 					if id, err := strconv.ParseUint(v, 10, 64); err == nil && id > 0 {
 						devID = &id

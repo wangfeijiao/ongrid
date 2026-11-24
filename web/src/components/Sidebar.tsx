@@ -43,7 +43,7 @@ import { SessionRevealRegion } from './SessionRevealRegion';
 import { Button } from './ui';
 import { useI18n } from '@/i18n/locale';
 import { useThemeMode } from '@/store/mode';
-import { Sun, Moon, Monitor, Languages } from 'lucide-react';
+import { Sun, Moon, Monitor, Languages, Presentation } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import type { IconType } from '@/lib/icon';
 import { useAuth } from '@/store/auth';
@@ -360,6 +360,7 @@ export function Sidebar() {
       <nav className="flex-1 overflow-y-auto px-2 pb-3">
         {/* L1 顶级入口 — 不缩进，直接可点 */}
         <div className="mt-1 space-y-0.5">
+          <SidebarNavItem to="/bigscreen" icon={Presentation} label={tr('监控大屏', 'Big screen')} level={1} />
           <SidebarNavItem to="/" icon={Home} label={tr('首页', 'Home')} exact level={1} />
           <SidebarNavItem to="/dashboard" icon={LayoutDashboard} label={tr('仪表盘', 'Dashboard')} level={1} />
         </div>

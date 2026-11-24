@@ -19,6 +19,7 @@ export * from './DropdownMenu';
 export * from './Tooltip';
 export * from './Tabs';
 export { Input } from './Input';
+export { SearchInput } from './SearchInput';
 export { Textarea } from './Textarea';
 export { Label } from './Label';
 export { Radio } from './Radio';

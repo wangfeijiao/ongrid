@@ -12,6 +12,7 @@ export function useAutoAPMOptions() {
       if (cancelled) return;
       setOptions({
         namespaces: saved.namespaces,
+        service_names: saved.service_names ?? {},
         environments: [...new Set([...saved.environments, ...devices.items.flatMap(device => device.environment ? [device.environment] : []), ...clusters.flatMap(cluster => typeof cluster.props?.environment === 'string' && cluster.props.environment ? [cluster.props.environment] : [])])].sort(),
       });
     }).catch((e: Error) => { if (!cancelled) setError(e.message); });

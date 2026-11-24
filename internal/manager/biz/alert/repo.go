@@ -12,8 +12,15 @@ type IncidentFilter struct {
 	Severity string
 	RuleKey  string
 	DeviceID *uint64
-	Limit    int
-	Offset   int
+	// ActiveOnly restricts the result to incidents that are not resolved
+	// (open / acknowledged / silenced). The built-in inhibitor needs this:
+	// any unresolved state still "covers" the scope, so probing for a
+	// single status would miss acknowledged roots. When both Status and
+	// ActiveOnly are set, Status wins (the predicates combine, so a
+	// resolved Status yields no rows — callers must not mix them).
+	ActiveOnly bool
+	Limit      int
+	Offset     int
 }
 
 // ChannelFilter is the biz-layer paged list filter for notification_channels.

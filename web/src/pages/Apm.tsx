@@ -30,6 +30,7 @@ import {
   type ApmDependencies,
   type ApmRuntime,
   type ApmSummary,
+  type ApmHost,
 } from '@/api/apm';
 import { Button, Card, Chip, EmptyState, PageHeader, PaginationFooter } from '@/components/ui';
 import { ServiceMap } from '@/components/apm/ServiceMap';
@@ -40,7 +41,7 @@ import { VersionComparison } from '@/components/apm/VersionComparison';
 import { ServiceLogs } from '@/components/apm/ServiceLogs';
 import { RepositoryBindingButton } from '@/components/apm/RepositoryBinding';
 import { ServiceSetup } from '@/components/apm/ServiceSetup';
-import { SearchInput } from '@/components/apm/SearchInput';
+import { SearchInput } from '@/components/ui/SearchInput';
 import { ServiceSwitcher } from '@/components/apm/ServiceSwitcher';
 import { RuntimeMetrics } from '@/components/apm/RuntimeMetrics';
 import { InstrumentationDiagnostics } from '@/components/apm/InstrumentationDiagnostics';
@@ -103,7 +104,12 @@ export default function ApmPage() {
       if (cancelled) return;
       setResourceError(results.some((result) => result.status === 'rejected'));
       setResourceOptions(Object.fromEntries(results.map((result, index) => [index === 0 ? 'device_id' : 'cluster_node_id',
-        result.status === 'fulfilled' ? (result.value.items || []).map((item) => ({ value: String(item.id), label: `${item.name || item.id} (#${item.id})` })) : [],
+        result.status === 'fulfilled' ? (result.value.items || []).map((item) => {
+          // Show the device IP in the filter option so operators can pick a
+          // host by IP — the searchable Select matches against this label.
+          const ip = index === 0 && 'ip_address' in item ? (item.ip_address || '').trim() : '';
+          return { value: String(item.id), label: `${item.name || item.id}${ip ? ` · ${ip}` : ''} (#${item.id})` };
+        }) : [],
       ])));
     });
     return () => { cancelled = true; };
@@ -345,6 +351,20 @@ export default function ApmPage() {
     main.current.scrollTop = saved?.query === query ? saved.scroll : 0;
   }, [list, current?.rpcList, detail, tab, query, scope, location.state]);
   const unset = tr('未设置', 'Unset');
+  const hostLabel = (host: ApmHost) => host.ip || host.hostname || host.name || host.device_id;
+  const hostContent = (hosts: ApmHost[] | undefined) => {
+    if (!hosts?.length) return tr('未关联主机', 'No host');
+    return (
+      <div className="space-y-0.5">
+        {hosts.map((host) => (
+          <div key={host.device_id}>
+            {hostLabel(host)}
+            {host.name && host.name !== hostLabel(host) ? <span className="ml-1 text-zinc-500">{host.name}</span> : null}
+          </div>
+        ))}
+      </div>
+    );
+  };
   const status = (s: string) =>
     ({
       observed: tr('已观测', 'Observed'),
@@ -476,7 +496,7 @@ export default function ApmPage() {
       const options = resourceOptions[key] || [];
       const selected = params.get(key) || '';
       return <FilterField key={key} label={label} className="max-w-sm">
-        <Select aria-label={label} className="max-w-52" value={selected}
+        <Select aria-label={label} className="max-w-52" value={selected} searchable={key === 'device_id'}
           onValueChange={(value) => set(key, value || null)}
           options={[{ value: '', label: all }, ...options,
             ...(selected && !options.some((item) => item.value === selected) ? [{ value: selected, label: `#${selected}` }] : [])]} />
@@ -830,7 +850,7 @@ export default function ApmPage() {
                     />
                   ) : (
                     <div className="overflow-x-auto">
-                      <table className={`w-full min-w-[960px] text-left text-sm${detail ? ' table-fixed' : ''}`}>
+                      <table className={`w-full min-w-[1040px] text-left text-sm${detail ? ' table-fixed' : ''}`}>
                         {detail && <colgroup>
                           {['45%', '14%', '14%', '14%', '13%'].map((width, i) => (
                             <col key={i} style={{ width }} />
@@ -851,6 +871,9 @@ export default function ApmPage() {
                                 </th>
                                 <th className="px-3 py-3 font-normal">
                                   {tr('命名空间', 'Namespace')}
+                                </th>
+                                <th className="px-3 py-3 font-normal">
+                                  {tr('服务器', 'Server')}
                                 </th>
                               </>
                             )}
@@ -923,6 +946,15 @@ export default function ApmPage() {
 
                                     >
                                       {row.identity.service_namespace || unset}
+                                    </td></Hint>
+                                    <Hint content={hostContent(row.hosts)}><td
+                                      className="max-w-40 truncate px-3 py-4 align-top text-zinc-400"
+
+                                    >
+                                      {row.hosts?.length ? hostLabel(row.hosts[0]) : unset}
+                                      {row.hosts && row.hosts.length > 1 && (
+                                        <span className="ml-1 text-xs text-zinc-500">+{row.hosts.length - 1}</span>
+                                      )}
                                     </td></Hint>
                                   </>
                                 )}

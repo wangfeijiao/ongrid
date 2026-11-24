@@ -4,6 +4,7 @@ import { ClusterChipLink } from "@/components/ClusterChipLink";
 import { loadTopologyClusters } from "@/lib/deviceClusters";
 import { selectHostEdgesByDevice } from '@/lib/edgeSelection';
 import { Label, Input, Radio } from '@/components/ui';
+import { SearchInput } from '@/components/ui/SearchInput';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { Hint } from '@/components/ui/Tooltip';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
@@ -11,6 +12,7 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { Select } from '@/components/ui/Select';
 import { Checkbox } from '@/components/ui/Checkbox';
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -34,6 +36,7 @@ import {
   Network,
   HardDrive,
   Server,
+  Search,
   ShipWheel,
 } from "lucide-react";
 import { StatusPill } from "@/components/StatusPill";
@@ -95,6 +98,7 @@ import {
 import { getManagerVersion } from "@/api/version";
 import { usePermissions } from "@/store/me";
 import { notifyDevicesChanged } from "@/lib/events";
+import { isDeviceOnline } from "@/lib/deviceStatus";
 import { useI18n } from "@/i18n/locale";
 
 // Sidebar headers that map to ?roles= filters. Empty string = "全部"; the
@@ -190,10 +194,46 @@ export default function EdgesPage() {
     () => new URLSearchParams(location.search).get("view") === "network-discovery",
     [location.search],
   );
+  // Free-text filter over the inventory that's already in memory: matches
+  // device name, hostname and IP (management address for SNMP devices, the
+  // agent-reported address for hosts). Kept in the URL so a filtered view
+  // survives refresh and can be shared — same convention as ?roles=.
+  const query = useMemo(
+    () => new URLSearchParams(location.search).get("q")?.trim() ?? "",
+    [location.search],
+  );
+  // ?online=1|0 —— 在线/离线子集过滤（大屏"在线设备""离线设备"两格下钻带过来）。
+  // 后端 /devices 只支持 roles，故在内存里按 Device.online 过滤（全量仅几十台）。
+  const onlineFilter = useMemo<"" | "online" | "offline">(() => {
+    const v = new URLSearchParams(location.search).get("online");
+    if (v === "1") return "online";
+    if (v === "0") return "offline";
+    return "";
+  }, [location.search]);
+  const clearOnlineFilter = useCallback(() => {
+    const params = new URLSearchParams(location.search);
+    params.delete("online");
+    const qs = params.toString();
+    navigate(`/devices${qs ? `?${qs}` : ""}`, { replace: true });
+  }, [location.search, navigate]);
+  const setQuery = useCallback(
+    (next: string) => {
+      const params = new URLSearchParams(location.search);
+      const trimmed = next.trim();
+      if (trimmed) params.set("q", trimmed);
+      else params.delete("q");
+      const qs = params.toString();
+      navigate(`/devices${qs ? `?${qs}` : ""}`, { replace: true });
+    },
+    [location.search, navigate],
+  );
   const headerTitle = (() => {
     if (discoveryView) return tr("网络发现", "Network discovery");
     const pair = ROLE_FILTER_TITLES[rolesFilter];
-    return pair ? tr(pair[0], pair[1]) : tr("设备", "Devices");
+    const base = pair ? tr(pair[0], pair[1]) : tr("设备", "Devices");
+    if (onlineFilter === "online") return tr("在线设备", "Online devices");
+    if (onlineFilter === "offline") return tr("离线设备", "Offline devices");
+    return base;
   })();
 
   const [devices, setDevices] = useState<DeviceRow[]>([]);
@@ -473,16 +513,39 @@ export default function EdgesPage() {
     }
   }
 
+  // Case-insensitive "contains" match over everything an operator is likely to
+  // type into the search box: display name, hostname, and the IP shown in the
+  // table (which differs between host and SNMP-managed devices).
+  const filteredDevices = useMemo(() => {
+    let list = devices;
+    // 与大屏同一口径（网络设备看可达状态，其余看 agent 心跳）
+    if (onlineFilter === "online") list = list.filter((d) => isDeviceOnline(d));
+    else if (onlineFilter === "offline") list = list.filter((d) => !isDeviceOnline(d));
+    const needle = query.trim().toLowerCase();
+    if (!needle) return list;
+    return list.filter((d) => {
+      const detail = networkDetails[d.id];
+      const haystack = [
+        d.name,
+        d.hostname,
+        d.ip_address,
+        detail?.management_address,
+        d.hostEdge ? extractIP(d.hostEdge.host_info) : null,
+      ];
+      return haystack.some((v) => (v ?? "").toLowerCase().includes(needle));
+    });
+  }, [devices, networkDetails, query, onlineFilter]);
+
   const selectableDevices = useMemo(
     () =>
       k8sAttachments
-        ? devices.filter(
+        ? filteredDevices.filter(
             (d) =>
               !d.hostEdge ||
               !isK8sManagedEdge(k8sAttachments[d.hostEdge.id] ?? []),
           )
         : [],
-    [devices, k8sAttachments],
+    [filteredDevices, k8sAttachments],
   );
   const selectableDeviceIDs = useMemo(
     () => new Set(selectableDevices.map((d) => d.id)),
@@ -626,6 +689,8 @@ export default function EdgesPage() {
     view: discoveryView ? "discovery" : "inventory",
     roles: rolesFilter,
     device_count: devices.length,
+    matched_count: filteredDevices.length,
+    search_query: query,
     selected_count: selected.size,
     selected_device_ids: [...selected].slice(0, 8).join(', '),
     sample_device_ids: devices.slice(0, 8).map(d => d.id).join(', '),
@@ -639,7 +704,24 @@ export default function EdgesPage() {
           title={headerTitle}
           subtitle={discoveryView
                 ? tr(`${pendingCandidateCount} 个候选等待 SNMP 校验`, `${pendingCandidateCount} candidates awaiting SNMP verification`)
-                : tr(`${devices.length} 台设备 · 每 10 秒自动刷新`, `${devices.length} device(s) · auto-refresh every 10s`)}
+                : query
+                  ? tr(`匹配 ${filteredDevices.length} / ${devices.length} 台设备`, `${filteredDevices.length} of ${devices.length} device(s) matched`)
+                  : onlineFilter
+                    ? (
+                      <span className="inline-flex items-center gap-2">
+                        {onlineFilter === "online"
+                          ? tr(`${filteredDevices.length} 台在线 · 共 ${devices.length} 台设备`, `${filteredDevices.length} online of ${devices.length} device(s)`)
+                          : tr(`${filteredDevices.length} 台离线 · 共 ${devices.length} 台设备`, `${filteredDevices.length} offline of ${devices.length} device(s)`)}
+                        <button
+                          type="button"
+                          onClick={clearOnlineFilter}
+                          className="text-indigo-600 hover:underline dark:text-indigo-400"
+                        >
+                          {tr("查看全部", "View all")}
+                        </button>
+                      </span>
+                    )
+                    : tr(`${devices.length} 台设备 · 每 10 秒自动刷新`, `${devices.length} device(s) · auto-refresh every 10s`)}
           actions={!discoveryView && rolesFilter === "network" ? (isAdmin && <Button variant="primary" size="sm" onClick={() => setSnmpCreateOpen(true)}><Plus size={14} />{tr("添加 SNMP 设备", "Add SNMP device")}</Button>) : !discoveryView && (
           <div className="flex items-center gap-2">
             <Hint content={tr(
@@ -741,6 +823,25 @@ export default function EdgesPage() {
             </div>
           )}
 
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="w-full max-w-xs">
+              <SearchInput
+                value={query}
+                onChange={setQuery}
+                label={tr('搜索名称 / IP / 主机名…', 'Search name / IP / hostname…')}
+              />
+            </div>
+            {query && (
+              <Button variant="plain" size="sm"
+                type="button"
+                onClick={() => setQuery('')}
+                className="px-2 py-1.5 text-zinc-400 hover:text-zinc-200"
+              >
+                {tr('清除筛选', 'Clear filter')}
+              </Button>
+            )}
+          </div>
+
           {devices.length === 0 ? (
             <EmptyStateCard
               icon={rolesFilter === "network" ? Network : Server}
@@ -758,6 +859,12 @@ export default function EdgesPage() {
                 ) : !rolesFilter && canMutate ? (
                   <Button variant="primary" onClick={() => setCreateOpen(true)}><Plus size={12} />{tr("新建设备", "New device")}</Button>
                 ) : undefined}
+            />
+          ) : filteredDevices.length === 0 ? (
+            <EmptyStateCard
+              icon={Search}
+              title={tr(`没有匹配「${query}」的设备`, `No device matches "${query}"`)}
+              action={<Button variant="outline" onClick={() => setQuery('')}>{tr("清除筛选", "Clear filter")}</Button>}
             />
           ) : (
           <div className="device-list-table w-full min-w-0 max-w-full overflow-x-auto rounded-xl border border-zinc-800/60 bg-zinc-900/40">
@@ -867,7 +974,7 @@ export default function EdgesPage() {
               </thead>
               <tbody className="divide-y divide-zinc-800/40">
                 {
-                  devices.map((d) => {
+                  filteredDevices.map((d) => {
                     const edge = d.hostEdge;
                     const networkDevice = isManagedNetworkDevice(d);
                     const reachability = networkReachability(d);
@@ -1438,6 +1545,34 @@ function EdgeAccessMeta({
   );
 }
 
+type DiscoveryObserver = {
+  observer_edge_id?: string;
+  observer_edge_name?: string;
+  observer_host_name?: string;
+  ip_address?: string;
+  interface_name?: string;
+  source?: string;
+  confidence?: string;
+  sys_name?: string;
+  observed_at?: string;
+};
+
+// OPT-010/011: _observers is stored as a JSON-array-encoded string inside
+// source_data_json, so the API returns it as a plain string here. Parse it
+// defensively; anything malformed degrades to "no observers" rather than
+// breaking the table.
+function parseDiscoveryObservers(candidate: NetworkDiscoveryCandidate): DiscoveryObserver[] {
+  const raw = candidate.source_data?._observers;
+  if (!raw) return [];
+  try {
+    const outer: unknown = JSON.parse(raw);
+    const list = typeof outer === "string" ? JSON.parse(outer) : outer;
+    return Array.isArray(list) ? (list as DiscoveryObserver[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 function NetworkDiscoveryTable({
   candidates,
   loading,
@@ -1450,6 +1585,14 @@ function NetworkDiscoveryTable({
   tr: (zh: string, en: string) => string;
 }) {
   const { isAdmin } = usePermissions();
+  const [expandedObservers, setExpandedObservers] = useState<Set<number>>(new Set());
+  const toggleObservers = (id: number) =>
+    setExpandedObservers((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const sourceLabel = (source: string) => {
     switch (source.toLowerCase()) {
       case "arp": return tr("ARP 邻居", "ARP neighbor");
@@ -1467,6 +1610,7 @@ function NetworkDiscoveryTable({
             <th className="px-3 py-2.5 text-left">IP</th>
             <th className="px-3 py-2.5 text-left">MAC</th>
             <th className="px-3 py-2.5 text-left">{tr("扫描源", "Scanner")}</th>
+            <th className="px-3 py-2.5 text-left">{tr("观察者", "Observers")}</th>
             <th className="px-3 py-2.5 text-left">{tr("发现方式", "Method")}</th>
             <th className="px-3 py-2.5 text-left">{tr("置信度", "Confidence")}</th>
             <th className="px-3 py-2.5 text-left">{tr("状态", "Status")}</th>
@@ -1476,19 +1620,37 @@ function NetworkDiscoveryTable({
         </thead>
         <tbody className="divide-y divide-zinc-800/40">
           {loading && candidates.length === 0 ? (
-            <tr><td colSpan={8} className="px-4 py-10 text-center text-zinc-500">{tr("加载中…", "Loading…")}</td></tr>
+            <tr><td colSpan={9} className="px-4 py-10 text-center text-zinc-500">{tr("加载中…", "Loading…")}</td></tr>
           ) : candidates.length === 0 ? (
-            <tr><td colSpan={8} className="px-4 py-10 text-center text-zinc-500">{tr("暂未发现候选网络设备。", "No network candidates discovered yet.")}</td></tr>
+            <tr><td colSpan={9} className="px-4 py-10 text-center text-zinc-500">{tr("暂未发现候选网络设备。", "No network candidates discovered yet.")}</td></tr>
           ) : candidates.map((candidate) => {
             const verified = candidate.status === "snmp_verified";
             const promoted = candidate.status === "promoted";
+            const observers = parseDiscoveryObservers(candidate);
+            const expanded = expandedObservers.has(candidate.id);
             return (
-              <tr key={candidate.id} className="hover:bg-zinc-900/60">
+              <Fragment key={candidate.id}>
+              <tr className="hover:bg-zinc-900/60">
                 <td className="px-3 py-3 font-mono text-xs text-zinc-200">{candidate.ip_address || "—"}</td>
                 <td className="px-3 py-3 font-mono text-xs text-zinc-400">{candidate.mac || "—"}</td>
                 <td className="min-w-[220px] px-3 py-2.5 text-zinc-400">
                   <div className="truncate text-xs font-medium text-zinc-300">{candidate.observer_host_name || tr("未知 Host", "Unknown host")}</div>
                   <div className="truncate text-[10px] leading-4 text-zinc-600">{candidate.observer_edge_name || `Edge #${candidate.observer_edge_id}`} · Host</div>
+                </td>
+                <td className="px-3 py-2.5">
+                  {observers.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleObservers(candidate.id)}
+                      className="inline-flex items-center gap-1 rounded border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300 hover:border-zinc-500 hover:text-zinc-100"
+                      title={tr("展开查看每条观察者证据", "Expand observer evidence")}
+                    >
+                      <ChevronDown size={12} className={cn("transition-transform", expanded && "rotate-180")} />
+                      {tr(`${observers.length} 个观察者`, `${observers.length} observers`)}
+                    </button>
+                  ) : (
+                    <span className="text-[11px] text-zinc-600">—</span>
+                  )}
                 </td>
                 <td className="min-w-[180px] whitespace-nowrap px-3 py-2.5 text-xs text-zinc-400">{sourceLabel(candidate.source)}{candidate.interface_name ? ` · ${candidate.interface_name}` : ""}</td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-xs text-zinc-400">{candidate.confidence}%</td>
@@ -1502,6 +1664,34 @@ function NetworkDiscoveryTable({
                   {!promoted && isAdmin && <Button variant="ghost" className="whitespace-nowrap" onClick={() => onConfigure(candidate)}><ShieldCheck size={13} />{tr("配置 SNMP", "Configure SNMP")}</Button>}
                 </td>
               </tr>
+              {expanded && observers.length > 0 && (
+                <tr>
+                  <td colSpan={9} className="bg-zinc-950/40 px-4 py-3">
+                    <div className="mb-2 text-[11px] font-medium text-zinc-400">
+                      {tr(`来自 ${observers.length} 台扫描端的观察证据`, `Evidence from ${observers.length} scanner edges`)}
+                    </div>
+                    <div className="grid grid-cols-1 gap-1.5 md:grid-cols-2 xl:grid-cols-3">
+                      {observers.map((o, idx) => (
+                        <div key={`${o.observer_edge_id}-${idx}`} className="rounded border border-zinc-800/70 bg-zinc-900/40 px-2.5 py-1.5 text-[10px] leading-4 text-zinc-400">
+                          <div className="font-medium text-zinc-300">
+                            {o.observer_host_name || `Edge #${o.observer_edge_id || "?"}`}
+                          </div>
+                          <div className="font-mono text-zinc-500">
+                            {o.ip_address || "—"}{o.interface_name ? ` · ${o.interface_name}` : ""}
+                          </div>
+                          <div className="text-zinc-500">
+                            {o.source ? sourceLabel(o.source) : "—"}
+                            {o.confidence ? ` · ${o.confidence}%` : ""}
+                            {o.sys_name ? ` · ${o.sys_name}` : ""}
+                          </div>
+                          {o.observed_at && <div className="text-zinc-600">{o.observed_at}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             );
           })}
         </tbody>

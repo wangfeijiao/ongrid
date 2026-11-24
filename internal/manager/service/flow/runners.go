@@ -102,11 +102,23 @@ func (s Notifier) Notify(ctx context.Context, channelIDs []uint64, title, messag
 			}
 			continue
 		}
+		// DedupeKey is NOT used here to suppress duplicate notices — every
+		// flow run is a distinct event, so the key carries a run-unique
+		// timestamp instead. It is set because notify.formatText only emits
+		// the "dedupe: <key>" line when this field is non-empty, and
+		// operators configure webhook robots (DingTalk/WeCom) with a
+		// keyword that must appear in the message body. Alert
+		// notifications have always carried this line (renderIncidentMessage
+		// passes incident.DedupeKey), but flow notices silently did not —
+		// so every flow push was rejected with errcode 310000 as soon as the
+		// robot keyword happened to be "dedupe". Keeping both paths on the
+		// same body shape removes that asymmetry.
 		msg := notify.Message{
 			Subject:    title,
 			Body:       message,
 			Severity:   notify.SeverityInfo,
 			Source:     "flow",
+			DedupeKey:  fmt.Sprintf("flow-%d", time.Now().UTC().UnixNano()),
 			OccurredAt: time.Now().UTC(),
 		}
 		if err := s.Router.SendVia(ctx, msg, sender); err != nil {

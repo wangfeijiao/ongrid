@@ -28,6 +28,7 @@ import { Modal } from '@/components/Modal';
 import { cn } from '@/lib/cn';
 import { openObservabilityUrl, buildExploreUrl } from '@/lib/drilldown';
 import { relativeTime } from '@/lib/format';
+import { describeAlertText, humanizeNotifyMessage, humanizeReason, incidentStatusLabel, severityLabel } from '@/lib/alertText';
 import { usePoll } from '@/lib/usePoll';
 import { useObservability } from '@/store/observability';
 import {
@@ -166,7 +167,14 @@ export default function IncidentDetailPage() {
               <AIInitialDiagnosisPanel incident={incident} events={events} />
               <AgentTimelinePanel incidentId={incident.id} />
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
-                <Timeline events={events} />
+                <Timeline
+                  events={events}
+                  ruleName={
+                    incident.rule_key
+                      ? localizedRuleName(incident.rule_key, incident.rule_name || incident.rule_key)
+                      : undefined
+                  }
+                />
                 <Sidebar2 incident={incident} />
               </div>
             </div>
@@ -249,6 +257,19 @@ function Header({
     }
   }, [incident, deepDiveBusy, navigate]);
 
+  // The stored summary is the engine's `rule: <promql> ⇒ labels (value=…)`
+  // string. Lead with the Chinese rule name + readable labels; the raw
+  // expression stays available on hover.
+  const headTitle = (() => {
+    if (!incident) return `incident #—`;
+    const ruleName = localizedRuleName(incident.rule_key, incident.rule_name || incident.rule_key);
+    const described = describeAlertText(incident.summary, tr);
+    if (described.expr) {
+      return described.headline ? `${ruleName} · ${described.headline}` : ruleName;
+    }
+    return incident.summary || ruleName || `incident #${incident.id}`;
+  })();
+
   return (
     <header className="app-header border-b border-zinc-800/60 px-6 py-4">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -258,8 +279,11 @@ function Header({
               <ChevronLeft size={12} /> {tr('返回告警', 'Back to alerts')}
             </Link>
           </div>
-          <h1 className="mt-1 truncate text-base font-semibold text-zinc-100">
-            {incident?.summary || (incident && localizedRuleName(incident.rule_key, incident.rule_name || incident.rule_key)) || `incident #${incident?.id ?? '—'}`}
+          <h1
+            className="mt-1 truncate text-base font-semibold text-zinc-100"
+            title={incident?.summary || undefined}
+          >
+            {incident ? headTitle : `incident #${'—'}`}
           </h1>
           <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
             {incident && <SeverityBadge severity={incident.severity} />}
@@ -357,7 +381,7 @@ function Header({
 
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5"
           >
-            <Bell size={12} /> Ack
+            <Bell size={12} /> {tr('认领', 'Ack')}
           </Button></Hint>
           <Hint content={viewerTip}><Button variant="outline" size="sm"
             type="button"
@@ -366,7 +390,7 @@ function Header({
 
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-emerald-300"
           >
-            <CheckCircle2 size={12} /> Resolve
+            <CheckCircle2 size={12} /> {tr('解决', 'Resolve')}
           </Button></Hint>
           <Hint content={viewerTip}><Button variant="outline" size="sm"
             type="button"
@@ -375,7 +399,7 @@ function Header({
 
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5"
           >
-            <BellOff size={12} /> Silence
+            <BellOff size={12} /> {tr('静默', 'Silence')}
           </Button></Hint>
         </div>
       </div>
@@ -876,7 +900,7 @@ function AIInitialDiagnosisPanel({
   return null;
 }
 
-function Timeline({ events }: { events: IncidentEvent[] }) {
+function Timeline({ events, ruleName }: { events: IncidentEvent[]; ruleName?: string }) {
   const { tr } = useI18n();
   if (events.length === 0) {
     return (
@@ -892,15 +916,54 @@ function Timeline({ events }: { events: IncidentEvent[] }) {
       </div>
       <ol className="divide-y divide-zinc-800/40">
         {events.map((ev) => (
-          <TimelineItem key={ev.id} event={ev} />
+          <TimelineItem key={ev.id} event={ev} ruleName={ruleName} />
         ))}
       </ol>
     </div>
   );
 }
 
-function TimelineItem({ event }: { event: IncidentEvent }) {
-  const text = event.message || event.reason || '';
+function TimelineItem({ event, ruleName }: { event: IncidentEvent; ruleName?: string }) {
+  const { tr } = useI18n();
+  // The engine writes either a human message (AI diagnosis, operator note)
+  // or a raw `rule: <promql> ⇒ labels (value=…)` title. Only the former is
+  // readable, so we describe the latter instead of dumping PromQL.
+  const message = (event.message || '').trim();
+  const reason = humanizeReason(event.reason, tr);
+  const described = describeAlertText(event.title, tr);
+
+  // `alert_events.title` is truncated by the writer, so long expressions
+  // arrive without their `⇒ labels` tail. Those can't be parsed — lead with
+  // the rule name and keep the raw text behind the disclosure.
+  const truncatedExpr =
+    !described.structured && (described.headline.length > 60 || described.headline.includes('⇒'))
+      ? described.headline
+      : undefined;
+
+  const notifyMessage =
+    event.event_type === 'notification_failed' ? humanizeNotifyMessage(message, tr) : message;
+
+  let primary = '';
+  let secondary = '';
+  let expr = described.expr;
+
+  if (notifyMessage) {
+    primary = notifyMessage;
+    secondary = [described.structured ? described.headline : '', reason].filter(Boolean).join(' · ');
+  } else if (described.structured) {
+    primary = described.headline;
+    secondary = [described.detail, reason].filter(Boolean).join(' · ');
+  } else if (truncatedExpr && ruleName) {
+    primary = ruleName;
+    expr = truncatedExpr;
+  } else if (event.event_type === 'notification_sent' && reason) {
+    // reason carries the channel name here, e.g. "Ongrid通知" — a bare
+    // channel name reads like a system key, so phrase it as a sentence.
+    primary = tr(`已通过「${reason}」发送通知`, `Notification sent via 「${reason}」`);
+  } else {
+    primary = reason || described.headline;
+  }
+
   return (
     <li className="flex gap-3 px-4 py-3">
       <div className="flex shrink-0 flex-col items-center">
@@ -919,17 +982,25 @@ function TimelineItem({ event }: { event: IncidentEvent }) {
         <div className="flex flex-wrap items-center gap-2">
           <EventTypeBadge type={event.event_type} />
           {event.severity && (
-            <span className="text-[11px] text-zinc-500">{event.severity}</span>
+            <span className="text-[11px] text-zinc-500">{severityLabel(event.severity, tr)}</span>
           )}
           <span className="ml-auto text-[11px] text-zinc-500">
             {relativeTime(event.occurred_at || event.created_at)}
           </span>
         </div>
-        {text && (
-          <div className="mt-1 whitespace-pre-wrap break-words text-sm text-zinc-300">{text}</div>
+        {primary && (
+          <div className="mt-1 whitespace-pre-wrap break-words text-sm text-zinc-300">{primary}</div>
         )}
-        {!text && event.title && (
-          <div className="mt-1 text-sm text-zinc-400">{event.title}</div>
+        {secondary && <div className="mt-1 text-xs text-zinc-500">{secondary}</div>}
+        {described.expr && (
+          <details className="group mt-1.5">
+            <summary className="cursor-pointer list-none text-[11px] text-indigo-300/80 hover:text-indigo-200">
+              {tr('查看查询表达式', 'Show query expression')}
+            </summary>
+            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-zinc-950/60 p-2 text-[11px] leading-relaxed text-zinc-400">
+              {described.expr}
+            </pre>
+          </details>
         )}
       </div>
     </li>
@@ -943,9 +1014,9 @@ function Sidebar2({ incident }: { incident: Incident }) {
   return (
     <aside className="space-y-4">
       <section className="rounded-xl border border-zinc-800/60 bg-zinc-900/40">
-        <div className="border-b border-zinc-800/60 px-4 py-2.5 text-[11px] uppercase tracking-wider text-zinc-500">
-          Labels
-        </div>
+          <div className="border-b border-zinc-800/60 px-4 py-2.5 text-[11px] uppercase tracking-wider text-zinc-500">
+            {tr('标签', 'Labels')}
+          </div>
         {labelKeys.length === 0 ? (
           <div className="px-4 py-3 text-xs text-zinc-500">—</div>
         ) : (
@@ -984,7 +1055,7 @@ function Sidebar2({ incident }: { incident: Incident }) {
 
       {incident.dedupe_key && (
         <section className="rounded-xl border border-zinc-800/60 bg-zinc-900/40 px-4 py-3">
-          <div className="text-[11px] uppercase tracking-wider text-zinc-500">Dedupe key</div>
+          <div className="text-[11px] uppercase tracking-wider text-zinc-500">{tr('去重键', 'Dedupe key')}</div>
           <div className="mt-1 break-all font-mono text-[11px] text-zinc-400">{incident.dedupe_key}</div>
         </section>
       )}
@@ -1301,21 +1372,24 @@ function isTraceIncident(incident: Incident): boolean {
 }
 
 function SeverityBadge({ severity }: { severity: IncidentSeverity }) {
+  const { tr } = useI18n();
   const styles =
     severity === 'critical'
       ? 'bg-red-500/15 text-red-300 ring-red-500/40'
       : severity === 'warning'
       ? 'bg-amber-500/10 text-amber-300 ring-amber-500/30'
       : 'bg-zinc-800 text-zinc-300 ring-zinc-700';
+  const label = severityLabel(severity, tr);
   return (
     <span className={cn('inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset', styles)}>
       {severity === 'critical' ? <Siren size={11} /> : <AlertTriangle size={11} />}
-      {severity}
+      {label}
     </span>
   );
 }
 
 function StatusBadge({ status }: { status: IncidentStatus }) {
+  const { tr } = useI18n();
   const styles =
     status === 'open'
       ? 'bg-red-500/10 text-red-300 ring-red-500/30'
@@ -1324,6 +1398,7 @@ function StatusBadge({ status }: { status: IncidentStatus }) {
       : status === 'silenced'
       ? 'bg-zinc-700 text-zinc-300 ring-zinc-600'
       : 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/30';
+  const label = incidentStatusLabel(status, tr);
   return (
     <span className={cn('inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset', styles)}>
       {status === 'resolved' ? (
@@ -1333,14 +1408,15 @@ function StatusBadge({ status }: { status: IncidentStatus }) {
       ) : (
         <span className="h-1.5 w-1.5 rounded-full bg-current" />
       )}
-      {status}
+      {label}
     </span>
   );
 }
 
 function EventTypeBadge({ type }: { type: string }) {
+  const { tr } = useI18n();
   const styles = eventTypeStyles(type);
-  const label = humanizeEventType(type);
+  const label = humanizeEventType(type, tr);
   return (
     <span
       className={cn(
@@ -1391,30 +1467,30 @@ function eventTypeStyles(type: string): string {
   }
 }
 
-function humanizeEventType(type: string): string {
+function humanizeEventType(type: string, t: (zh: string, en: string) => string): string {
   switch (type) {
     case 'firing':
-      return 'firing';
+      return t('告警触发', 'Firing');
     case 'reopened':
-      return 'reopened';
+      return t('告警复燃', 'Reopened');
     case 'acknowledged':
-      return 'acknowledged';
+      return t('已认领', 'Acknowledged');
     case 'resolved':
-      return 'resolved';
+      return t('已恢复', 'Resolved');
     case 'silenced':
-      return 'silenced';
+      return t('已静默', 'Silenced');
     case 'inhibited':
-      return 'inhibited';
+      return t('被抑制', 'Inhibited');
     case 'repeat_suppressed':
-      return 'repeat suppressed';
+      return t('重复触发 · 已节流', 'Repeat suppressed');
     case 'notification_sent':
-      return 'notification sent';
+      return t('通知已发送', 'Notification sent');
     case 'notification_failed':
-      return 'notification failed';
+      return t('通知发送失败', 'Notification failed');
     case 'note':
-      return 'note';
+      return t('备注', 'Note');
     case 'ai_initial_diagnosis':
-      return trInline('AI 初查', 'AI initial diagnosis');
+      return t('AI 初查', 'AI initial diagnosis');
     default:
       return type;
   }
