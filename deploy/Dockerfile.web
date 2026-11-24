@@ -43,6 +43,19 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Shanghai \
     LANG=C.UTF-8
+
+# jammy ships nginx 1.18, which has no `http2 on;` directive (added in 1.25.1)
+# and rejects the operator nginx.conf at startup. Pull nginx from the upstream
+# apt repo so the served version matches the config surface we require.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends curl ca-certificates gnupg; \
+    curl -fsSL https://nginx.org/keys/nginx_signing.key \
+        | gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg; \
+    echo 'deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] http://nginx.org/packages/ubuntu jammy nginx' \
+        > /etc/apt/sources.list.d/nginx.list; \
+    rm -rf /var/lib/apt/lists/*
+
 RUN set -eux; \
     echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries; \
     for i in 1 2 3 4 5; do \
