@@ -176,6 +176,56 @@ describe('BigScreenPage', () => {
 
     fireEvent.click(screen.getByTitle('查看服务器明细'));
     expect(screen.getByTestId('route').textContent).toBe('/devices?roles=server');
+
+    // 在线/离线格子带 online 过滤，落到设备页对应子集
+    fireEvent.click(screen.getByTitle('查看在线设备明细'));
+    expect(screen.getByTestId('route').textContent).toBe('/devices?online=1');
+    fireEvent.click(screen.getByTitle('查看离线设备明细'));
+    expect(screen.getByTestId('route').textContent).toBe('/devices?online=0');
+  });
+
+  it('价值卡下钻到真实告警列表，闭环率带“已解决”筛选（不再落到首页 AI 助手）', async () => {
+    render(
+      <MemoryRouter initialEntries={['/bigscreen']}>
+        <LocationProbe />
+        <BigScreenPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText('告警闭环率')).toBeInTheDocument());
+
+    const cellOf = (label: string) => screen.getByText(label).closest('.bs-value-cell') as HTMLElement;
+
+    fireEvent.click(cellOf('告警闭环率'));
+    expect(screen.getByTestId('route').textContent).toBe('/alerts?status=resolved');
+
+    fireEvent.click(cellOf('次风险预警'));
+    expect(screen.getByTestId('route').textContent).toBe('/alerts');
+
+    // /alerts/incidents 是不存在的列表路由，会被 catch-all 重定向到 /（首页 AI 助手）
+    expect(screen.getByTestId('route').textContent).not.toMatch(/^\/alerts\/incidents$/);
+  });
+
+  it('环形图用 SVG 渲染、分段可悬浮并在中心显示该段数值', async () => {
+    render(<MemoryRouter><BigScreenPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('资源健康度')).toBeInTheDocument());
+
+    // 旧实现（CSS conic-gradient + 宽驱动固定尺寸）已彻底移除，避免再次溢出面板。
+    expect(document.querySelector('.bs-donut-box')).toBeNull();
+    const chart = document.querySelector('.bs-donut-chart');
+    expect(chart?.querySelector('svg.bs-donut-svg')).not.toBeNull();
+
+    const segs = chart?.querySelectorAll('.bs-donut-seg') ?? [];
+    expect(segs.length).toBeGreaterThan(0);
+
+    const center = chart?.querySelector('.bs-donut-center');
+    // 默认态只显示总数，不显示分类文字（沿用 OPT-018 的“中心纯数字”）。
+    expect(center?.querySelector('small')).toBeNull();
+
+    // 悬浮某一段：中心切换为该段数值 + 名称，移出后恢复。
+    fireEvent.mouseEnter(segs[0]);
+    await waitFor(() => expect(center?.querySelector('small')?.textContent).toBeTruthy());
+    fireEvent.mouseLeave(segs[0]);
+    await waitFor(() => expect(center?.querySelector('small')).toBeNull());
   });
 });
 
