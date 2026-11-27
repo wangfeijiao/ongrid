@@ -1,6 +1,7 @@
 package toolresult
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -21,6 +22,7 @@ import (
 	session "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	model "github.com/ongridio/ongrid/internal/manager/model/toolresult"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
+	"github.com/ongridio/ongrid/internal/pkg/mcpclient"
 	"github.com/ongridio/ongrid/internal/pkg/resultfile"
 	"github.com/ongridio/ongrid/internal/pkg/toolcapture"
 )
@@ -134,6 +136,8 @@ type View struct {
 	MoreIndexedPaths   bool                `json:"more_indexed_paths,omitempty"`
 	PathIndexPartial   bool                `json:"path_index_partial,omitempty"`
 	Preview            string              `json:"preview,omitempty"`
+	StructuredContent  json.RawMessage     `json:"structuredContent,omitempty"`
+	TableSource        *TableSource        `json:"table_source,omitempty"`
 	Instruction        string              `json:"instruction,omitempty"`
 }
 
@@ -195,6 +199,8 @@ func encodeView(v View) string {
 		switch {
 		case len(v.Preview) > 0:
 			v.Preview = prefix(v.Preview, len(v.Preview)/2)
+		case v.TableSource != nil && len(v.TableSource.SampleFields) > 0:
+			v.TableSource.SampleFields = v.TableSource.SampleFields[:len(v.TableSource.SampleFields)-1]
 		case len(v.TextPointers) > 0:
 			v.MoreIndexedPaths = true
 			v.TextPointers = v.TextPointers[:len(v.TextPointers)-1]
@@ -259,8 +265,13 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 	instruction := "Use query_tool_result to select evidence, or read_tool_result for a bounded page. Preview is only an excerpt; do not re-run the original tool to retrieve more data."
 	if row.CaptureStatus == "partial" {
 		instruction += " The source or capture limit omitted data; saved evidence is incomplete and cannot establish whole-dataset counts or absence."
-	} else if u.analyzer != nil {
-		instruction += " For whole-dataset questions, custom calculations, joins or nested formats, use analyze_tool_results to evaluate jq expressions over the complete saved inputs."
+	} else {
+		if status == "success" && tool != "analyze_tool_results" {
+			instruction += " For an HTML list, pass this result_id, rows_pointer, columns and filters directly to serve_page.table. It verifies pagination, applies the filters and returns row counts."
+		}
+		if u.analyzer != nil {
+			instruction += " For custom calculations, joins or nested formats, use analyze_tool_results to evaluate jq expressions over the complete saved inputs."
+		}
 	}
 	v := View{Kind: "tool_result", ResultID: row.ID, Status: status, ExecutionStatus: executionStatus, CaptureStatus: row.CaptureStatus, StorageStatus: "ready", ViewStatus: "excerpt", CapturedBytes: int64(len(raw)), Preview: prefix(string(raw), 2048), Instruction: instruction}
 	v.Operation = captureOperation(tool, output)
@@ -275,19 +286,15 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 		return encodeView(v)
 	}
 	toolcapture.Link(ctx, row.ID)
-	// Keep control envelopes and small legacy results byte-for-byte intact.
-	if ((len(output) <= ViewLimit && len(raw) <= ViewLimit) || tool == "draft_config_change") && runErr == nil && row.CaptureStatus == "complete" {
-		if !isMCPResult(tool) {
+	if runErr == nil && row.CaptureStatus == "complete" {
+		small := len(output) <= ViewLimit && len(raw) <= ViewLimit
+		if isMCPResult(tool) {
+			if result, ok := inlineMCPResult(v, raw, output, small); ok {
+				return result
+			}
+		} else if small || tool == "draft_config_change" {
 			return output
 		}
-		var mcp struct {
-			Structured json.RawMessage `json:"structuredContent"`
-		}
-		if json.Unmarshal(raw, &mcp) != nil || len(mcp.Structured) == 0 || string(mcp.Structured) == "null" || string(mcp.Structured) == output {
-			return output
-		}
-		// A small MCP text block can be just a receipt for structured data.
-		v.Preview = "/structuredContent: " + prefix(string(mcp.Structured), 1024) + "\nMCP text: " + prefix(output, 768)
 	}
 	if row.ContentType == "application/json" {
 		idx, indexErr := u.repo.Index(writeCtx, row)
@@ -310,7 +317,97 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 	if tool == "analyze_tool_results" && status == "success" && u.analyzer != nil {
 		v.Instruction += " For this saved analysis use json_text at /stdout with collection_pointer /values or /coverage."
 	}
+	if isMCPResult(tool) && status == "success" && row.CaptureStatus == "complete" {
+		v.TableSource = describeTextTable(raw)
+		if v.TableSource != nil {
+			v.Instruction = "For an HTML list, pass this result_id, table_source.text_pointer and table_source.rows_pointer to serve_page.table with the requested columns and filters. The preview is an excerpt. Reuse the saved rows directly. Keep the requested search scope; use or_pointers for alternative fields and ignore_case when appropriate. saved_rows counts this capture. The exporter checks upstream totals and pagination and returns counts."
+			if u.analyzer != nil {
+				v.Instruction += " For custom analysis, use json_text with text_pointer as pointer and rows_pointer as collection_pointer. Each inputs record has the business row under .value."
+			}
+		}
+	}
 	return encodeView(v)
+}
+
+// Fit the business payload independently of the MCP display text. Keep the
+// saved reference for follow-up reads and exports. Never truncate the payload.
+func inlineMCPResult(v View, raw []byte, output string, small bool) (string, bool) {
+	var mcp struct {
+		Structured inlineMCPPayload `json:"structuredContent"`
+	}
+	if json.Unmarshal(raw, &mcp) != nil {
+		return output, small
+	}
+	if len(mcp.Structured) == 0 || string(mcp.Structured) == "null" {
+		return output, small || (v.Status == "success" && len(output) <= ViewLimit && isCompleteMCPText(raw, output))
+	}
+	if small && string(mcp.Structured) == output {
+		return output, true
+	}
+	if v.Status != "success" {
+		return "", false
+	}
+	v.ViewStatus = "inline"
+	v.StructuredContent = json.RawMessage(mcp.Structured)
+	v.Instruction = ""
+	v.Preview = ""
+	b, err := json.Marshal(v)
+	if err != nil || len(b) > ViewLimit {
+		return "", false
+	}
+	if string(mcp.Structured) != output {
+		v.Preview = prefix(output, max(0, ViewLimit-len(b)-len(`,"preview":""`)))
+		if v.Preview != "" {
+			return encodeView(v), true
+		}
+	}
+	return string(b), true
+}
+
+// A JSON string can fit after unescaping even when its wire representation
+// does not. Only bypass the saved view if the text accounts for the result.
+func isCompleteMCPText(raw []byte, output string) bool {
+	var result mcpclient.CallResult
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if d.Decode(&result) != nil || result.IsError || len(result.Content) == 0 {
+		return false
+	}
+	for _, block := range result.Content {
+		if block.Type != "text" || len(block.Text) > len(output) {
+			return false
+		}
+	}
+	return result.TextContent() == output
+}
+
+type inlineMCPPayload []byte
+
+func (p *inlineMCPPayload) UnmarshalJSON(data []byte) error {
+	// Skip large business arrays without making another full-size copy. Pretty
+	// printing can put a small value over the limit, so ignore JSON whitespace
+	// for this lower bound. json.Compact preserves whitespace inside strings.
+	if len(data) > ViewLimit {
+		n := 0
+		for _, b := range data {
+			if b > ' ' {
+				n++
+			}
+			if n > ViewLimit {
+				return errors.New("MCP payload exceeds inline limit")
+			}
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, data); err != nil {
+			return err
+		}
+		data = compact.Bytes()
+		if len(data) > ViewLimit {
+			return errors.New("MCP payload exceeds inline limit")
+		}
+	}
+	*p = append((*p)[:0], data...)
+	return nil
 }
 
 type cursor struct {

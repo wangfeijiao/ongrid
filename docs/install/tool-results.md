@@ -28,7 +28,9 @@ The quota counts compressed payload, index and manifest file sizes. It is not a 
 
 The model uses `read_tool_result` and `query_tool_result`; the console's saved-result dialog uses the authenticated session API. JSON array output uses a `data_json` string so large integer IDs retain their exact digits. Search counts cover only the displayed scan interval. Partial or expired captures must not be presented as complete evidence.
 
-The saved view lists arrays in `collection_pointers`, strings in `text_pointers`, and native MCP objects, numbers, booleans and nulls in `value_pointers`. Use `json_value` to analyze one of these values. If `more_indexed_paths` is true, call `read_tool_result` with `mode="structure"` and follow `next_cursor` for more indexed paths. If `path_index_partial` is true, the index may omit paths. A terminal structure page with `scan_complete=false` explains the limit and has no next cursor. For earlier file-backed JSON results, structure mode rebuilds the inventory on read when the payload fits the 8 MiB scan limit. Larger historical results expose their saved paths and a notice. Byte reads and analysis at known paths still use the original payload.
+For successful MCP queries, the model can answer directly from the complete `structuredContent` when it and the saved-result reference fit in the 4,000-byte tool response. This inline view can include the MCP display text when space permits. The original response remains available by `result_id` for exports and follow-up queries. A text-only MCP response can also pass through directly when its decoded text fits.
+
+The excerpt view lists arrays in `collection_pointers`, strings in `text_pointers`, and native MCP objects, numbers, booleans and nulls in `value_pointers`. Use `json_value` to analyze one of these values. If `more_indexed_paths` is true, call `read_tool_result` with `mode="structure"` and follow `next_cursor` for more indexed paths. If `path_index_partial` is true, the index may omit paths. A terminal structure page with `scan_complete=false` explains the limit and has no next cursor. For earlier file-backed JSON results, structure mode rebuilds the inventory on read when the payload fits the 8 MiB scan limit. Larger historical results expose their saved paths and a notice. Byte reads and analysis at known paths still use the original payload.
 
 | Saved data | How to select it |
 | --- | --- |
@@ -36,6 +38,42 @@ The saved view lists arrays in `collection_pointers`, strings in `text_pointers`
 | MCP display blocks | Select `/content` to read or count the blocks. A single block can describe many business records. |
 | JSON encoded in a string | Use analysis format `json_text`, set `pointer` to the string, and set `collection_pointer` to the array inside the decoded JSON. |
 | Single JSON object or scalar | Use analysis format `json_value`. It emits one record and applies the 1 MiB record limit. |
+
+## Complete lists and HTML exports
+
+For a complete list from a read-only MCP query with a cursor, page number or offset in its input schema, the chat tool accepts `ongrid_all_pages`. Set `rows_pointer` to the business array inside `structuredContent` or the JSON in a single text block. Supply `total_pointer` and `next_pointer` for nonstandard response fields, and `id_pointer` when rows have a unique key. The Manager keeps the original query filters on every page. Tools that require approval show the all-pages request as one approval. Single-page calls use the upstream tool as usual.
+
+The saved aggregate exposes `/structuredContent/rows`. Page and offset queries require an upstream total. Cursor queries follow the cursor to its end and verify a supplied total. Missing rows, repeating cursors or pages, and upstream failures produce partial evidence. One collection runs for up to a minute, with at most 100 pages, 100,000 rows and 16 MiB of business response data.
+
+To export a saved JSON array, call `serve_page` with a table specification. For example:
+
+```json
+{"title":"Inventory","table":{"result_id":"<saved-result-uuid>","rows_pointer":"/structuredContent/rows","columns":[{"label":"Host","pointer":"/hostname"},{"label":"Department","pointer":"/department"}],"filters":[{"pointer":"/department","op":"not_equals","value":"Retired"}]}}
+```
+
+The page tool reads the authorized session result, applies all filters and returns the page link with source, excluded and exported row counts. For JSON inside an MCP text block, use `text_pointer` (such as `/content/0/text`) and a row pointer relative to the decoded text. A reported upstream total or an explicit `expected_rows` is compared with the number of source rows before filtering. Without upstream pagination metadata, the counts cover the selected saved array. A table accepts up to 32 columns, 16 MiB of input and 16 MiB of rendered output. For custom HTML the existing `html` argument remains available.
+
+For a successful MCP result stored as a single JSON text block, the excerpt can include a `table_source` with the decoded array path, the row count in this capture and sample field pointers from the first three rows. Automatic discovery covers captures up to 1 MiB with one unambiguous indexed array of objects. Use `read_tool_result` in `structure` mode to discover these paths on an existing saved result. If a page contains all rows reported by the upstream total, it can be exported in the next tool call.
+
+All filters must pass. Use `or_pointers` when a keyword may occur in several fields, and `ignore_case` for case-insensitive comparisons. For example, this exports rows with “svn” in either the hostname or the description, excluding rows where either ownership field contains “Example Team”.
+
+```json
+{
+  "title": "SVN inventory",
+  "table": {
+    "result_id": "<saved-result-uuid>",
+    "text_pointer": "/content/0/text",
+    "rows_pointer": "/data",
+    "columns": [{"label": "Hostname", "pointer": "/hostname"}],
+    "filters": [
+      {"pointer": "/hostname", "or_pointers": ["/description"], "op": "contains", "value": "svn", "ignore_case": true},
+      {"pointer": "/owner", "or_pointers": ["/department"], "op": "not_contains", "value": "Example Team"}
+    ]
+  }
+}
+```
+
+In a filter with alternatives, missing and null values do not match. On a nonempty source, each specified alternative must exist on at least one row. All filters together can reference up to 32 fields.
 
 ## Recovery and retention
 
